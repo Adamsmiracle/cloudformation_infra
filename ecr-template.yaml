@@ -130,7 +130,6 @@ Resources:
     Properties:
       ManagedPolicyName: !Sub "${RoleName}-ecr-push-policy"
       Description: Grants the minimum permissions required to authenticate to ECR and
-  
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
