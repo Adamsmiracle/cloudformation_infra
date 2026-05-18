@@ -1,0 +1,227 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: >
+  Secure CI/CD infrastructure for the aws_lab_applications repository.
+  Provisions a GitHub OIDC identity provider, a private ECR repository with
+  scan-on-push and a lifecycle policy, a least-privilege IAM managed policy
+  for ECR push operations, and an IAM role that GitHub Actions assumes via
+  OIDC federation.
+
+# ---------------------------------------------------------------------------
+# Parameters: the moving parts a future deployment might want to change.
+# ---------------------------------------------------------------------------
+Parameters:
+
+  GitHubOrg:
+    Type: String
+    Default: Adamsmiracle
+    Description: GitHub username or organization that owns the application repository.
+
+  GitHubRepo:
+    Type: String
+    Default: aws_lab_applications
+    Description: Name of the GitHub repository containing the application code.
+
+  EcrRepoName:
+    Type: String
+    Default: adamsmiracle-springboot-app
+    Description: Name of the private ECR repository to create.
+  
+
+  RoleName:
+    Type: String
+    Default: github-actions-ecr-push-role
+    Description: Name of the IAM role that GitHub Actions will assume via OIDC.
+
+
+  ProjectTag:
+    Type: String
+    Default: aws-lab-secure-cicd
+    Description: Value applied to the Project tag on every taggable resource.
+
+# ---------------------------------------------------------------------------
+# Resources: the actual infrastructure to provision.
+# ---------------------------------------------------------------------------
+Resources:
+
+  # -------------------------------------------------------------------------
+  # 1. GitHub OIDC identity provider.
+  #    Registers token.actions.githubusercontent.com as a trusted OIDC IdP
+  #    so AWS STS will accept JWTs signed by GitHub.
+  # -------------------------------------------------------------------------
+  GitHubOIDCProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      ThumbprintList:
+        # AWS auto-rotates and validates this for the GitHub URL; value is
+        # functionally a placeholder. Kept here because the property is required.
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Purpose
+          Value: GitHubActionsOIDC
+
+  # -------------------------------------------------------------------------
+  # 2. Private ECR repository.
+  #    Scan-on-push enabled, AES256 encryption, lifecycle policy to keep the
+  #    repo tidy. Tag mutability is MUTABLE for lab iteration convenience;
+  #    production workloads should prefer IMMUTABLE.
+  # -------------------------------------------------------------------------
+  EcrRepository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RepositoryName: !Ref EcrRepoName
+      ImageTagMutability: MUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      EncryptionConfiguration:
+        EncryptionType: AES256
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Expire untagged images older than 7 days",
+                "selection": {
+                  "tagStatus": "untagged",
+                  "countType": "sinceImagePushed",
+                  "countUnit": "days",
+                  "countNumber": 7
+                },
+                "action": { "type": "expire" }
+              },
+              {
+                "rulePriority": 2,
+                "description": "Keep only the 10 most recent tagged images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 10
+                },
+                "action": { "type": "expire" }
+              }
+            ]
+          }
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Application
+          Value: !Ref GitHubRepo
+
+  # -------------------------------------------------------------------------
+  # 3. Least-privilege managed policy.
+  #    Splits permissions into two statements:
+  #      - GetAuthorizationToken on "*" (account-level action, cannot be scoped).
+  #      - Push-related actions scoped to the specific repository ARN.
+  # -------------------------------------------------------------------------
+  EcrPushPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub "${RoleName}-ecr-push-policy"
+      Description: >
+        Grants the minimum permissions required to authenticate to ECR and
+        push container images to a single private repository.
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowEcrAuthorization
+            Effect: Allow
+            Action: ecr:GetAuthorizationToken
+            Resource: "*"
+          - Sid: AllowImagePushToSpecificRepository
+            Effect: Allow
+            Action:
+              - ecr:BatchCheckLayerAvailability
+              - ecr:InitiateLayerUpload
+              - ecr:UploadLayerPart
+              - ecr:CompleteLayerUpload
+              - ecr:PutImage
+              - ecr:BatchGetImage
+            Resource: !GetAtt EcrRepository.Arn
+
+  # -------------------------------------------------------------------------
+  # 4. IAM role assumed by GitHub Actions via OIDC.
+  #    Trust policy locks the role to:
+  #      - The GitHub OIDC provider we just created.
+  #      - The sts.amazonaws.com audience claim (literal match).
+  #      - The specific GitHubOrg/GitHubRepo (any branch/workflow via wildcard).
+  # -------------------------------------------------------------------------
+  GitHubActionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref RoleName
+      Description: >
+        Assumed by GitHub Actions workflows in the configured repository via
+        OIDC federation. Grants only the ECR push permissions defined in the
+        attached managed policy.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowGitHubActionsOIDC
+            Effect: Allow
+            Principal:
+              Federated: !Ref GitHubOIDCProvider
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubOrg}/${GitHubRepo}:*"
+      ManagedPolicyArns:
+        - !Ref EcrPushPolicy
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectTag
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: Purpose
+          Value: GitHubActionsCICD
+
+# ---------------------------------------------------------------------------
+# Outputs: values you (and your GitHub Actions workflow) will need.
+# ---------------------------------------------------------------------------
+Outputs:
+
+  GitHubOIDCProviderArn:
+    Description: ARN of the GitHub OIDC identity provider.
+    Value: !Ref GitHubOIDCProvider
+    Export:
+      Name: !Sub "${AWS::StackName}-GitHubOIDCProviderArn"
+
+  EcrRepositoryName:
+    Description: Name of the ECR repository.
+    Value: !Ref EcrRepository
+    Export:
+      Name: !Sub "${AWS::StackName}-EcrRepositoryName"
+
+  EcrRepositoryUri:
+    Description: Full URI of the ECR repository (use this in image tags).
+    Value: !GetAtt EcrRepository.RepositoryUri
+    Export:
+      Name: !Sub "${AWS::StackName}-EcrRepositoryUri"
+
+  EcrRepositoryArn:
+    Description: ARN of the ECR repository.
+    Value: !GetAtt EcrRepository.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-EcrRepositoryArn"
+
+  GitHubActionsRoleArn:
+    Description: >
+      ARN of the IAM role for GitHub Actions to assume. Put this value in
+      the role-to-assume input of aws-actions/configure-aws-credentials.
+    Value: !GetAtt GitHubActionsRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-GitHubActionsRoleArn"
