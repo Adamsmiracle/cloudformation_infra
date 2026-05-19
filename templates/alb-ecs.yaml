@@ -1,0 +1,286 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  ALB (with two target groups for blue/green), ECS Fargate cluster + service,
+  task definition, and CPU-based auto scaling. The service deployment
+  controller is CODE_DEPLOY so CodeDeploy can flip target groups.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: fullstack-lab
+  ContainerPort:
+    Type: Number
+    Default: 8080
+  ContainerCpu:
+    Type: Number
+    Default: 512
+  ContainerMemory:
+    Type: Number
+    Default: 1024
+  DesiredCount:
+    Type: Number
+    Default: 1
+  MinCapacity:
+    Type: Number
+    Default: 1
+  MaxCapacity:
+    Type: Number
+    Default: 4
+  CpuTargetUtilization:
+    Type: Number
+    Default: 60
+  # Initial image used to stand up the service before the first real
+  # application build lands. Public ECR nginx works fine for bootstrapping.
+  InitialImage:
+    Type: String
+    Default: public.ecr.aws/nginx/nginx:stable
+
+Resources:
+  # ---------- Security groups ----------
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ALB - open HTTP from internet
+      VpcId:
+        Fn::ImportValue: !Sub ${ProjectName}-VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-alb-sg
+
+  ServiceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ECS tasks - only the ALB may talk to them
+      VpcId:
+        Fn::ImportValue: !Sub ${ProjectName}-VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-svc-sg
+
+  ServiceIngressFromAlb:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ServiceSecurityGroup
+      IpProtocol: tcp
+      FromPort: !Ref ContainerPort
+      ToPort: !Ref ContainerPort
+      SourceSecurityGroupId: !Ref AlbSecurityGroup
+
+  # ---------- ALB ----------
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub ${ProjectName}-alb
+      Scheme: internet-facing
+      Type: application
+      SecurityGroups:
+        - !Ref AlbSecurityGroup
+      Subnets:
+        - Fn::ImportValue: !Sub ${ProjectName}-PublicSubnet1
+        - Fn::ImportValue: !Sub ${ProjectName}-PublicSubnet2
+
+  TargetGroupBlue:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${ProjectName}-tg-blue
+      VpcId:
+        Fn::ImportValue: !Sub ${ProjectName}-VpcId
+      Port: !Ref ContainerPort
+      Protocol: HTTP
+      TargetType: ip
+      HealthCheckPath: /
+      HealthCheckIntervalSeconds: 15
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher:
+        HttpCode: 200
+
+  TargetGroupGreen:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${ProjectName}-tg-green
+      VpcId:
+        Fn::ImportValue: !Sub ${ProjectName}-VpcId
+      Port: !Ref ContainerPort
+      Protocol: HTTP
+      TargetType: ip
+      HealthCheckPath: /
+      HealthCheckIntervalSeconds: 15
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher:
+        HttpCode: 200
+
+  HttpListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroupBlue
+
+  # ---------- IAM ----------
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+
+  # ---------- Logs ----------
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/${ProjectName}
+      RetentionInDays: 14
+
+  # ---------- ECS ----------
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub ${ProjectName}-cluster
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${ProjectName}-task
+      Cpu: !Ref ContainerCpu
+      Memory: !Ref ContainerMemory
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt TaskRole.Arn
+      ContainerDefinitions:
+        - Name: app
+          Image: !Ref InitialImage
+          PortMappings:
+            - ContainerPort: !Ref ContainerPort
+              Protocol: tcp
+          Essential: true
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: app
+
+  Service:
+    Type: AWS::ECS::Service
+    DependsOn: HttpListener
+    Properties:
+      ServiceName: !Sub ${ProjectName}-service
+      Cluster: !Ref Cluster
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: !Ref DesiredCount
+      LaunchType: FARGATE
+      DeploymentController:
+        Type: CODE_DEPLOY
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets:
+            - Fn::ImportValue: !Sub ${ProjectName}-PrivateSubnet1
+            - Fn::ImportValue: !Sub ${ProjectName}-PrivateSubnet2
+          SecurityGroups:
+            - !Ref ServiceSecurityGroup
+      LoadBalancers:
+        - ContainerName: app
+          ContainerPort: !Ref ContainerPort
+          TargetGroupArn: !Ref TargetGroupBlue
+      HealthCheckGracePeriodSeconds: 60
+
+  # ---------- Auto scaling (CPU target tracking) ----------
+  ScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MinCapacity: !Ref MinCapacity
+      MaxCapacity: !Ref MaxCapacity
+      ResourceId: !Sub service/${Cluster}/${Service.Name}
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+      RoleARN: !Sub arn:aws:iam::${AWS::AccountId}:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService
+
+  CpuScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub ${ProjectName}-cpu-target-tracking
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        TargetValue: !Ref CpuTargetUtilization
+        ScaleInCooldown: 60
+        ScaleOutCooldown: 60
+
+Outputs:
+  AlbDns:
+    Value: !GetAtt LoadBalancer.DNSName
+    Export:
+      Name: !Sub ${ProjectName}-AlbDns
+  AlbArn:
+    Value: !Ref LoadBalancer
+    Export:
+      Name: !Sub ${ProjectName}-AlbArn
+  ClusterName:
+    Value: !Ref Cluster
+    Export:
+      Name: !Sub ${ProjectName}-ClusterName
+  ServiceName:
+    Value: !GetAtt Service.Name
+    Export:
+      Name: !Sub ${ProjectName}-ServiceName
+  TaskDefinitionArn:
+    Value: !Ref TaskDefinition
+    Export:
+      Name: !Sub ${ProjectName}-TaskDefinitionArn
+  TargetGroupBlueName:
+    Value: !GetAtt TargetGroupBlue.TargetGroupName
+    Export:
+      Name: !Sub ${ProjectName}-TgBlueName
+  TargetGroupGreenName:
+    Value: !GetAtt TargetGroupGreen.TargetGroupName
+    Export:
+      Name: !Sub ${ProjectName}-TgGreenName
+  HttpListenerArn:
+    Value: !Ref HttpListener
+    Export:
+      Name: !Sub ${ProjectName}-HttpListenerArn
+  TaskExecutionRoleArn:
+    Value: !GetAtt TaskExecutionRole.Arn
+    Export:
+      Name: !Sub ${ProjectName}-TaskExecutionRoleArn
+  TaskRoleArn:
+    Value: !GetAtt TaskRole.Arn
+    Export:
+      Name: !Sub ${ProjectName}-TaskRoleArn
