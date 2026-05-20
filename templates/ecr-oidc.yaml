@@ -6,15 +6,15 @@ Description: >
 Parameters:
   ProjectName:
     Type: String
-    Default: fullstack-lab
+    Default: ecs-ci-cd-lab
   GitHubOrg:
     Type: String
     Description: GitHub org or username that owns the application repo
-    Default: your-github-org
+    Default: Adamsmiracle
   AppRepoName:
     Type: String
     Description: Name of the GitHub repo holding the application code
-    Default: fullstack-lab-app
+    Default: aws_lab_applications
 
 Resources:
   # ---------- ECR ----------
@@ -50,9 +50,7 @@ Resources:
       ClientIdList:
         - sts.amazonaws.com
       ThumbprintList:
-        # GitHub OIDC root CA thumbprint. AWS does not strictly validate this
-        # for the GitHub provider, but the field is required.
-        - 6938fd4d98bab03faadb97b34396831e3780aea1
+        - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
 
   # ---------- Role GitHub Actions assumes ----------
   GitHubActionsEcrPushRole:

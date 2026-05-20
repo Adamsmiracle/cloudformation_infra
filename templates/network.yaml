@@ -7,7 +7,7 @@ Description: >
 Parameters:
   ProjectName:
     Type: String
-    Default: ecs-ci-cd
+    Default: ecs-ci-cd-lab
   VpcCidr:
     Type: String
     Default: 10.20.0.0/16

@@ -7,7 +7,7 @@ Description: >
 Parameters:
   ProjectName:
     Type: String
-    Default: fullstack-lab
+    Default: ecs-ci-cd-lab
   ContainerPort:
     Type: Number
     Default: 8080

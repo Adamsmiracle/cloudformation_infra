@@ -8,7 +8,7 @@ Description: >
 Parameters:
   ProjectName:
     Type: String
-    Default: fullstack-lab
+    Default: ecs-ci-cd-lab
   ImageTag:
     Type: String
     Default: latest
