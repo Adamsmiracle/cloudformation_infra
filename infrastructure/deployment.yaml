@@ -4,8 +4,8 @@ parameters:
   # ---- Filled in from bootstrap stack outputs ----
   TemplatesBaseUrl: https://s3.eu-central-1.amazonaws.com/ecs-ci-cd-cfn-templates-825765391206-eu-central-1
   # ---- App repo identity for the OIDC role created in child 02-ecr ----
-  GitHubOrg: adamsMiracle
-  AppRepoName: aws_lab_applications
+  GitHubOrg: Adamsmiracle
+  AppRepoName: cloudformation_infra
   # ---- Initial value; GitHub Actions bumps it on each upload ----
   TemplateVersion: sha-7e6645c
 tags:
