@@ -1,0 +1,136 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Bootstrap stack for the nested-stacks pattern. Creates the S3 bucket that
+  holds child CloudFormation templates and the IAM role GitHub Actions
+  assumes (via OIDC) to upload to it. Deployed ONCE, manually, before
+  GitSync takes over the parent template.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: ecs-ci-cd
+  GitHubOrg:
+    Type: String
+    Description: username that owns the infrastructure repo
+    Default: adamsMiracle
+  InfraRepoName:
+    Type: String
+    Description: repo holding the CloudFormation templates
+    Default: infra-repo
+
+Resources:
+  # ---- S3 bucket holding child CloudFormation templates ----
+  TemplatesBucket:
+    Type: AWS::S3::Bucket
+    # Keep templates around if the bootstrap stack is ever deleted.
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "${ProjectName}-cfn-templates-${AWS::AccountId}-${AWS::Region}"
+      VersioningConfiguration: { Status: Enabled }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+            BucketKeyEnabled: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireOldVersions
+            Status: Enabled
+            NoncurrentVersionExpirationInDays: 30
+            AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 }
+
+  # Deny non-TLS access
+  TemplatesBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref TemplatesBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - !GetAtt TemplatesBucket.Arn
+              - !Sub "${TemplatesBucket.Arn}/*"
+            Condition:
+              Bool: { "aws:SecureTransport": "false" }
+          # Let CloudFormation itself read the templates (needed for nested stacks)
+          - Sid: AllowCloudFormationRead
+            Effect: Allow
+            Principal: { Service: cloudformation.amazonaws.com }
+            Action:
+              - s3:GetObject
+              - s3:GetObjectVersion
+            Resource: !Sub "${TemplatesBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+
+  # ---- IAM role GitHub Actions (infra repo) assumes via OIDC ----
+  InfraGitHubActionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-infra-gha-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub "arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com"
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubOrg}/${InfraRepoName}:*"
+      Policies:
+        - PolicyName: UploadTemplatesAndTriggerUpdates
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Upload child templates
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt TemplatesBucket.Arn
+                  - !Sub "${TemplatesBucket.Arn}/*"
+              # After upload, trigger CFN to re-evaluate the parent stack
+              # (otherwise child template changes go unnoticed).
+              - Effect: Allow
+                Action:
+                  - cloudformation:UpdateStack
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:GetTemplate
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:DeleteChangeSet
+                Resource:
+                  - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${ProjectName}/*"
+                  - !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:changeSet/*"
+
+Outputs:
+  TemplatesBucketName:
+    Description: S3 bucket holding child CloudFormation templates
+    Value: !Ref TemplatesBucket
+    Export: { Name: !Sub "${ProjectName}-templates-bucket" }
+
+  TemplatesBucketUrl:
+    Description: Base URL used in nested-stack TemplateURL properties
+    Value: !Sub "https://s3.${AWS::Region}.amazonaws.com/${TemplatesBucket}"
+
+  InfraGitHubActionsRoleArn:
+    Description: ARN of the role infra-repo GitHub Actions assumes
+    Value: !GetAtt InfraGitHubActionsRole.Arn
