@@ -34,6 +34,7 @@ Resources:
             ]
           }
 
+
   GitHubActionsEcrPushRole:
     Type: AWS::IAM::Role
     Properties:

@@ -111,6 +111,7 @@ Resources:
         - { Key: Project, Value: !Ref ProjectName }
         - { Key: Layer,   Value: compute }
 
+
   # -------------------------------------------------------------------------
   # Child 4 — CI/CD pipeline (EventBridge → CodePipeline → CodeDeploy)
   # -------------------------------------------------------------------------

@@ -19,6 +19,7 @@ Parameters:
   InitialImage:         { Type: String }
   TemplateVersion:      { Type: String }
 
+
 Resources:
   # ---- Security groups ----
   AlbSecurityGroup:

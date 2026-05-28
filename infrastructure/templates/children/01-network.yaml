@@ -28,6 +28,7 @@ Resources:
       Tags:
         - { Key: Name, Value: !Sub "${ProjectName}-igw" }
 
+
   AttachGateway:
     Type: AWS::EC2::VPCGatewayAttachment
     Properties:
