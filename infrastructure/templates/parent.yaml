@@ -1,0 +1,147 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Parent stack for the ECS CI/CD Lab. Deployed by CloudFormation GitSync.
+  Instantiates 4 nested stacks whose templates live in S3 (uploaded by
+  GitHub Actions in this repo). Parent passes parameters down; children
+  return outputs that other children consume via !GetAtt …Outputs.X.
+
+Parameters:
+  # Filled in by deployment.yaml (GitSync deployment file).
+  ProjectName:
+    Type: String
+    Default: ecs-ci-cd
+  TemplatesBaseUrl:
+    Type: String
+    Description: HTTPS prefix for child templates, e.g. https://s3.eu-central-1.amazonaws.com/<bucket>
+
+  # ---- Networking ----
+  VpcCidr:                  { Type: String, Default: 10.20.0.0/16 }
+  PublicSubnet1Cidr:        { Type: String, Default: 10.20.0.0/24 }
+  PublicSubnet2Cidr:        { Type: String, Default: 10.20.1.0/24 }
+  PrivateSubnet1Cidr:       { Type: String, Default: 10.20.10.0/24 }
+  PrivateSubnet2Cidr:       { Type: String, Default: 10.20.11.0/24 }
+
+  # ---- GitHub / OIDC (for the APP-repo workflow) ----
+  GitHubOrg:                { Type: String, Default: adamsMiracle }
+  AppRepoName:              { Type: String, Default: ecs-ci-cd-app }
+
+  # ---- ECS sizing ----
+  ContainerPort:            { Type: Number, Default: 8080 }
+  ContainerCpu:             { Type: Number, Default: 512 }
+  ContainerMemory:          { Type: Number, Default: 1024 }
+  DesiredCount:             { Type: Number, Default: 1 }
+  MinCapacity:              { Type: Number, Default: 1 }
+  MaxCapacity:              { Type: Number, Default: 4 }
+  CpuTargetUtilization:     { Type: Number, Default: 60 }
+  InitialImage:             { Type: String, Default: public.ecr.aws/nginx/nginx:stable }
+
+  # ---- Cache-busting (bumped by GitHub Actions on every template upload
+  # so that CFN re-evaluates the nested children even though their S3
+  # URLs are stable) ----
+  TemplateVersion:
+    Type: String
+    Default: initial
+    Description: Bumped on every infra-repo push to force nested stack refresh
+
+Resources:
+
+  # -------------------------------------------------------------------------
+  # Child 1 — Networking
+  # -------------------------------------------------------------------------
+  NetworkStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "${TemplatesBaseUrl}/children/01-network.yaml"
+      TimeoutInMinutes: 15
+      Parameters:
+        ProjectName:        !Ref ProjectName
+        VpcCidr:            !Ref VpcCidr
+        PublicSubnet1Cidr:  !Ref PublicSubnet1Cidr
+        PublicSubnet2Cidr:  !Ref PublicSubnet2Cidr
+        PrivateSubnet1Cidr: !Ref PrivateSubnet1Cidr
+        PrivateSubnet2Cidr: !Ref PrivateSubnet2Cidr
+        TemplateVersion:    !Ref TemplateVersion
+      Tags:
+        - { Key: Project, Value: !Ref ProjectName }
+        - { Key: Layer,   Value: network }
+
+  # -------------------------------------------------------------------------
+  # Child 2 — ECR + GitHub OIDC role (for the APP repo, not this one)
+  # -------------------------------------------------------------------------
+  EcrStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "${TemplatesBaseUrl}/children/02-ecr.yaml"
+      TimeoutInMinutes: 10
+      Parameters:
+        ProjectName:     !Ref ProjectName
+        GitHubOrg:       !Ref GitHubOrg
+        AppRepoName:     !Ref AppRepoName
+        TemplateVersion: !Ref TemplateVersion
+      Tags:
+        - { Key: Project, Value: !Ref ProjectName }
+        - { Key: Layer,   Value: registry }
+
+  # -------------------------------------------------------------------------
+  # Child 3 — ALB + ECS Fargate + autoscaling
+  # -------------------------------------------------------------------------
+  AlbEcsStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "${TemplatesBaseUrl}/children/03-alb-ecs.yaml"
+      TimeoutInMinutes: 20
+      Parameters:
+        ProjectName:          !Ref ProjectName
+        VpcId:                !GetAtt NetworkStack.Outputs.VpcId
+        VpcCidr:              !GetAtt NetworkStack.Outputs.VpcCidr
+        PublicSubnet1:        !GetAtt NetworkStack.Outputs.PublicSubnet1
+        PublicSubnet2:        !GetAtt NetworkStack.Outputs.PublicSubnet2
+        PrivateSubnet1:       !GetAtt NetworkStack.Outputs.PrivateSubnet1
+        PrivateSubnet2:       !GetAtt NetworkStack.Outputs.PrivateSubnet2
+        ContainerPort:        !Ref ContainerPort
+        ContainerCpu:         !Ref ContainerCpu
+        ContainerMemory:      !Ref ContainerMemory
+        DesiredCount:         !Ref DesiredCount
+        MinCapacity:          !Ref MinCapacity
+        MaxCapacity:          !Ref MaxCapacity
+        CpuTargetUtilization: !Ref CpuTargetUtilization
+        InitialImage:         !Ref InitialImage
+        TemplateVersion:      !Ref TemplateVersion
+      Tags:
+        - { Key: Project, Value: !Ref ProjectName }
+        - { Key: Layer,   Value: compute }
+
+  # -------------------------------------------------------------------------
+  # Child 4 — CI/CD pipeline (EventBridge → CodePipeline → CodeDeploy)
+  # -------------------------------------------------------------------------
+  PipelineStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "${TemplatesBaseUrl}/children/04-pipeline.yaml"
+      TimeoutInMinutes: 15
+      Parameters:
+        ProjectName:          !Ref ProjectName
+        ClusterName:          !GetAtt AlbEcsStack.Outputs.ClusterName
+        ServiceName:          !GetAtt AlbEcsStack.Outputs.ServiceName
+        TargetGroupBlueName:  !GetAtt AlbEcsStack.Outputs.TargetGroupBlueName
+        TargetGroupGreenName: !GetAtt AlbEcsStack.Outputs.TargetGroupGreenName
+        HttpListenerArn:      !GetAtt AlbEcsStack.Outputs.HttpListenerArn
+        TemplateVersion:      !Ref TemplateVersion
+      Tags:
+        - { Key: Project, Value: !Ref ProjectName }
+        - { Key: Layer,   Value: cicd }
+
+Outputs:
+  AlbDns:
+    Description: Public URL of the application
+    Value: !Sub "http://${AlbEcsStack.Outputs.AlbDnsName}"
+  EcrRepositoryUri:
+    Value: !GetAtt EcrStack.Outputs.EcrRepositoryUri
+  GitHubActionsRoleArn:
+    Description: For the APP repo workflow
+    Value: !GetAtt EcrStack.Outputs.GitHubActionsRoleArn
+  PipelineName:
+    Value: !GetAtt PipelineStack.Outputs.PipelineName
+  ArtifactBucket:
+    Description: Upload deploy-bundle.zip here, then call StartPipelineExecution
+    Value: !GetAtt PipelineStack.Outputs.ArtifactBucket

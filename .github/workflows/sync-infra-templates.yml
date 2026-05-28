@@ -1,0 +1,49 @@
+name: Sync Infrastructure Templates
+
+on:
+  push:
+    branches: [ecs-ci-cd]
+    paths:
+      - 'infrastructure/templates/parent.yaml'
+      - 'infrastructure/templates/children/**'
+
+permissions:
+  id-token: write   # OIDC token for AWS
+  contents: write   # push the TemplateVersion bump back
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # need parent commit to diff against
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.INFRA_GHA_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Upload changed templates to S3
+        run: |
+          git diff --name-only HEAD~1 HEAD -- infrastructure/templates/ \
+          | while read -r file; do
+              key="${file#infrastructure/templates/}"
+              echo "Uploading $file → s3://${{ secrets.TEMPLATES_BUCKET }}/$key"
+              aws s3 cp "$file" "s3://${{ secrets.TEMPLATES_BUCKET }}/$key"
+            done
+
+      - name: Bump TemplateVersion in deployment.yaml
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          sed -i "s/^  TemplateVersion:.*/  TemplateVersion: sha-${SHORT_SHA}/" \
+            infrastructure/deployment.yaml
+
+      - name: Commit and push TemplateVersion bump
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add infrastructure/deployment.yaml
+          git commit -m "ci: bump TemplateVersion to sha-$(echo ${{ github.sha }} | cut -c1-7)"
+          git push
