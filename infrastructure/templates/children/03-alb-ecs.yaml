@@ -38,6 +38,8 @@ Resources:
     Properties:
       GroupDescription: ECS tasks - only ALB may talk to them
       VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0, Description: HTTPS outbound (VPC endpoints + NAT) }
       Tags: [{ Key: Name, Value: !Sub "${ProjectName}-svc-sg" }]
 
   ServiceIngressFromAlb:

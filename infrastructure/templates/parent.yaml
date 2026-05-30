@@ -26,7 +26,7 @@ Parameters:
   AppRepoName:              { Type: String, Default: ecs-ci-cd-app }
 
   # ---- ECS sizing ----
-  ContainerPort:            { Type: Number, Default: 8080 }
+  ContainerPort:            { Type: Number, Default: 80 }
   ContainerCpu:             { Type: Number, Default: 512 }
   ContainerMemory:          { Type: Number, Default: 1024 }
   DesiredCount:             { Type: Number, Default: 1 }
@@ -112,8 +112,9 @@ Resources:
         - { Key: Layer,   Value: compute }
 
 
+
   # -------------------------------------------------------------------------
-  # Child 4 — CI/CD pipeline (EventBridge → CodePipeline → CodeDeploy)
+  # Child 4 — CI/CD pipeline (S3 upload → StartPipelineExecution → CodeDeploy)
   # -------------------------------------------------------------------------
   PipelineStack:
     Type: AWS::CloudFormation::Stack
