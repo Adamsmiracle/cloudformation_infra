@@ -7,6 +7,6 @@ parameters:
   GitHubOrg: Adamsmiracle
   AppRepoName: cloudformation_infra
   # ---- Initial value; GitHub Actions bumps it on each upload ----
-  TemplateVersion: sha-dd3bd08
+  TemplateVersion: sha-f045d58
 tags:
   Project: ecs-ci-cd
