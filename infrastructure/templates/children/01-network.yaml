@@ -10,7 +10,7 @@ Parameters:
   PrivateSubnet2Cidr:  { Type: String }
   TemplateVersion:
     Type: String
-    Description: Cache-buster propagated from parent; unused in resources
+    Description: upadated in deployment.yaml to force nested stack refresh
 
 Resources:
   Vpc:
@@ -124,9 +124,17 @@ Resources:
       GroupDescription: HTTPS from within VPC to interface endpoints
       VpcId: !Ref Vpc
       SecurityGroupIngress:
-        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: !Ref VpcCidr, Description: HTTPS from VPC }
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref VpcCidr
+          Description: HTTPS from VPC 
       SecurityGroupEgress:
-        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: !Ref VpcCidr, Description: HTTPS to interface endpoints }
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref VpcCidr
+          Description: HTTPS to interface endpoints }
       Tags: [{ Key: Name, Value: !Sub "${ProjectName}-endpoint-sg" }]
 
   EcrApiEndpoint:
