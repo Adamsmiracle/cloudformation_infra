@@ -103,17 +103,9 @@ Resources:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties: { RouteTableId: !Ref PrivateRouteTable, SubnetId: !Ref PrivateSubnet2 }
 
-  NatGatewayEip:
-    Type: AWS::EC2::EIP
-    DependsOn: AttachGateway
-    Properties:
-      Domain: vpc
-      Tags: [{ Key: Name, Value: !Sub "${ProjectName}-nat-eip" }]
-
   NatGateway:
     Type: AWS::EC2::NatGateway
     Properties:
-      AllocationId: !GetAtt NatGatewayEip.AllocationId
       ConnectivityType: public
       AvailabilityMode: regional
       VpcId: !Ref Vpc
