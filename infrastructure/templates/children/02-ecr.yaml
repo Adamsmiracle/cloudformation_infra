@@ -10,7 +10,7 @@ Parameters:
 Resources:
   EcrRepository:
     Type: AWS::ECR::Repository
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
       RepositoryName: !Sub "${ProjectName}-app"

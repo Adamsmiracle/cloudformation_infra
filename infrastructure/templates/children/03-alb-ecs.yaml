@@ -139,7 +139,7 @@ Resources:
   # ---- Logs ----
   LogGroup:
     Type: AWS::Logs::LogGroup
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
       LogGroupName: !Sub "/ecs/${ProjectName}"

@@ -14,7 +14,7 @@ Resources:
   # ---- Artifact bucket ----
   ArtifactBucket:
     Type: AWS::S3::Bucket
-    DeletionPolicy: Retain
+    DeletionPolicy: Delete
     UpdateReplacePolicy: Retain
     Properties:
       BucketName: !Sub "${ProjectName}-pipeline-artifacts-${AWS::AccountId}-${AWS::Region}"
