@@ -114,7 +114,8 @@ Resources:
     Type: AWS::EC2::NatGateway
     Properties:
       AllocationId: !GetAtt NatGatewayEip.AllocationId
-      SubnetId: !Ref PublicSubnet1
+      ConnectivityType: public
+      AvailabilityMode: regional
       Tags: [{ Key: Name, Value: !Sub "${ProjectName}-nat" }]
 
   PrivateDefaultRoute:
