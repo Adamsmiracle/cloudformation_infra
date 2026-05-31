@@ -116,6 +116,7 @@ Resources:
       AllocationId: !GetAtt NatGatewayEip.AllocationId
       ConnectivityType: public
       AvailabilityMode: regional
+      VpcId: !Ref MyVPC
       Tags: [{ Key: Name, Value: !Sub "${ProjectName}-nat" }]
 
   PrivateDefaultRoute:
