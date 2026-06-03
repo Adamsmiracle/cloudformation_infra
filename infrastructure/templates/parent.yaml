@@ -23,7 +23,7 @@ Parameters:
 
   # ---- GitHub / OIDC (for the APP-repo workflow) ----
   GitHubOrg:                { Type: String, Default: adamsMiracle }
-  AppRepoName:              { Type: String, Default: ecs-ci-cd-app }
+  AppRepoName:              { Type: String, Default: aws_lab_applications }
 
   # ---- ECS sizing ----
   ContainerPort:            { Type: Number, Default: 80 }
@@ -114,7 +114,7 @@ Resources:
 
 
   # -------------------------------------------------------------------------
-  # Child 4 — CI/CD pipeline (S3 upload → StartPipelineExecution → CodeDeploy)
+  # Child 4 — CI/CD pipeline (ECR push → EventBridge → CodePipeline → CodeDeploy)
   # -------------------------------------------------------------------------
   PipelineStack:
     Type: AWS::CloudFormation::Stack
@@ -128,6 +128,7 @@ Resources:
         TargetGroupBlueName:  !GetAtt AlbEcsStack.Outputs.TargetGroupBlueName
         TargetGroupGreenName: !GetAtt AlbEcsStack.Outputs.TargetGroupGreenName
         HttpListenerArn:      !GetAtt AlbEcsStack.Outputs.HttpListenerArn
+        EcrRepositoryName:    !GetAtt EcrStack.Outputs.EcrRepositoryName
         TemplateVersion:      !Ref TemplateVersion
       Tags:
         - { Key: Project, Value: !Ref ProjectName }

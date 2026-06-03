@@ -28,9 +28,17 @@ Resources:
       GroupDescription: ALB - open HTTP from internet
       VpcId: !Ref VpcId
       SecurityGroupIngress:
-        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0, Description: HTTP }
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP
       SecurityGroupEgress:
-        - { IpProtocol: tcp, FromPort: !Ref ContainerPort, ToPort: !Ref ContainerPort, CidrIp: !Ref VpcCidr, Description: To tasks }
+        - IpProtocol: tcp
+          FromPort: !Ref ContainerPort
+          ToPort: !Ref ContainerPort
+          CidrIp: !Ref VpcCidr
+          Description: To tasks
       Tags: [{ Key: Name, Value: !Sub "${ProjectName}-alb-sg" }]
 
   ServiceSecurityGroup:
@@ -39,7 +47,11 @@ Resources:
       GroupDescription: ECS tasks - only ALB may talk to them
       VpcId: !Ref VpcId
       SecurityGroupEgress:
-        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0, Description: HTTPS outbound (VPC endpoints + NAT) }
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS outbound (VPC endpoints + NAT) 
       Tags: [{ Key: Name, Value: !Sub "${ProjectName}-svc-sg" }]
 
   ServiceIngressFromAlb:
@@ -94,7 +106,8 @@ Resources:
       UnhealthyThresholdCount: 3
       Matcher: { HttpCode: 200 }
       TargetGroupAttributes:
-        - { Key: deregistration_delay.timeout_seconds, Value: '30' }
+        - Key: deregistration_delay.timeout_seconds
+          Value: '30' 
 
   HttpListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
@@ -103,7 +116,8 @@ Resources:
       Port: 80
       Protocol: HTTP
       DefaultActions:
-        - { Type: forward, TargetGroupArn: !Ref TargetGroupBlue }
+        - Type: forward 
+          TargetGroupArn: !Ref TargetGroupBlue
 
   # ---- IAM ----
   TaskExecutionRole:
@@ -115,6 +129,7 @@ Resources:
         Statement: [{ Effect: Allow, Principal: { Service: ecs-tasks.amazonaws.com }, Action: sts:AssumeRole }]
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
 
   TaskRole:
     Type: AWS::IAM::Role
@@ -162,11 +177,15 @@ Resources:
       RequiresCompatibilities: [FARGATE]
       ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
       TaskRoleArn: !GetAtt TaskRole.Arn
-      RuntimePlatform: { OperatingSystemFamily: LINUX, CpuArchitecture: X86_64 }
+      RuntimePlatform:
+        OperatingSystemFamily: LINUX
+        CpuArchitecture: X86_64
       ContainerDefinitions:
         - Name: app
           Image: !Ref InitialImage
-          PortMappings: [{ ContainerPort: !Ref ContainerPort, Protocol: tcp }]
+          PortMappings: 
+          - ContainerPort: !Ref ContainerPort 
+            Protocol: tcp 
           Essential: true
           LogConfiguration:
             LogDriver: awslogs

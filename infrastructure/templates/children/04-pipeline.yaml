@@ -8,6 +8,7 @@ Parameters:
   TargetGroupBlueName:  { Type: String }
   TargetGroupGreenName: { Type: String }
   HttpListenerArn:      { Type: String }
+  EcrRepositoryName:    { Type: String }
   TemplateVersion:      { Type: String }
 
 Resources:
@@ -137,11 +138,54 @@ Resources:
               - { Name: !Ref TargetGroupBlueName }
               - { Name: !Ref TargetGroupGreenName }
             ProdTrafficRoute: { ListenerArns: [!Ref HttpListenerArn] }
-      DeploymentConfigName: CodeDeployDefault.ECSAllAtOnce
+      DeploymentConfigName: CodeDeployDefault.ECSLinear10PercentEvery1Minutes
+
+  # ---- EventBridge ----
+  EventBridgePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-eventbridge-pipeline-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: events.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StartPipeline
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: codepipeline:StartPipelineExecution
+                Resource: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${ProjectName}-pipeline"
+
+  EcrImagePushRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${ProjectName}-ecr-push-rule"
+      Description: Trigger CodePipeline when a new image is pushed to ECR
+      EventPattern:
+        source:
+          - aws.ecr
+        detail-type:
+          - ECR Image Action
+        detail:
+          action-type:
+            - PUSH
+          result:
+            - SUCCESS
+          repository-name:
+            - !Ref EcrRepositoryName
+      State: ENABLED
+      Targets:
+        - Id: TriggerPipeline
+          Arn: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${ProjectName}-pipeline"
+          RoleArn: !GetAtt EventBridgePipelineRole.Arn
 
   # ---- CodePipeline ----
   # GitHub Actions uploads deploy-bundle.zip (taskdef.json + appspec.yaml + imageDetail.json)
-  # to the artifact bucket, then calls codepipeline:StartPipelineExecution to trigger this pipeline.
+  # to the artifact bucket. EventBridge then triggers this pipeline on ECR image push.
   Pipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:
