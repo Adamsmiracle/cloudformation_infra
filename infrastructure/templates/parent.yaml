@@ -22,7 +22,7 @@ Parameters:
   PrivateSubnet2Cidr:       { Type: String, Default: 10.20.11.0/24 }
 
   # ---- GitHub / OIDC (for the APP-repo workflow) ----
-  GitHubOrg:                { Type: String, Default: adamsMiracle }
+  GitHubOrg:                { Type: String, Default: Adamsmiracle }
   AppRepoName:              { Type: String, Default: aws_lab_applications }
 
   # ---- ECS sizing ----

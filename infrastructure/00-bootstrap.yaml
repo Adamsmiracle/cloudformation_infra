@@ -12,11 +12,15 @@ Parameters:
   GitHubOrg:
     Type: String
     Description: username that owns the infrastructure repo
-    Default: adamsMiracle
+    Default: Adamsmiracle
   InfraRepoName:
     Type: String
     Description: repo holding the CloudFormation templates
-    Default: infra-repo
+    Default: cloudformation_infra
+  AppRepoName:
+    Type: String
+    Description: repo holding the application source code
+    Default: aws_lab_applications
 
 Resources:
   # ---- S3 bucket holding child CloudFormation templates ----

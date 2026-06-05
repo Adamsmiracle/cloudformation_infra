@@ -38,7 +38,7 @@ Resources:
   GitHubActionsEcrPushRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: !Sub "${ProjectName}-gha-ecr-push-role"
+      RoleName: github-actions-ecr-push-role
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
