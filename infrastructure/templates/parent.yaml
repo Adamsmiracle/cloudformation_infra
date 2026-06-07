@@ -26,7 +26,7 @@ Parameters:
   AppRepoName:              { Type: String, Default: aws_lab_applications }
 
   # ---- ECS sizing ----
-  ContainerPort:            { Type: Number, Default: 80 }
+  ContainerPort:            { Type: Number, Default: 8080 }
   ContainerCpu:             { Type: Number, Default: 512 }
   ContainerMemory:          { Type: Number, Default: 1024 }
   DesiredCount:             { Type: Number, Default: 1 }

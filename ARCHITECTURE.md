@@ -88,8 +88,7 @@ Creates all Layer-3 isolation — the VPC, subnets across two AZs, routing, NAT,
 | `PrivateRouteTable` | `AWS::EC2::RouteTable` | Route table shared by both private subnets. Default route points to the NAT Gateway for general internet egress (e.g., pulling public base images on first launch). |
 | `PrivateSubnet1Assoc` | `AWS::EC2::SubnetRouteTableAssociation` | Associates `PrivateSubnet1` with `PrivateRouteTable`. |
 | `PrivateSubnet2Assoc` | `AWS::EC2::SubnetRouteTableAssociation` | Associates `PrivateSubnet2` with `PrivateRouteTable`. |
-| `NatGatewayEip` | `AWS::EC2::EIP` | Elastic IP allocated for the NAT Gateway. |
-| `NatGateway` | `AWS::EC2::NatGateway` | Regional NAT Gateway — not pinned to a specific subnet or AZ. Enables outbound internet access from private subnets without exposing tasks to inbound connections. `ConnectivityType: public` with an Elastic IP for internet egress. |
+| `NatGateway` | `AWS::EC2::NatGateway` | Regional (multi-AZ HA) NAT Gateway — `AvailabilityMode: regional` with `VpcId` instead of a single `SubnetId`, so AWS spreads it across AZs automatically. Enables outbound internet access from private subnets (e.g. pulling the public placeholder image on first launch) without exposing tasks to inbound connections. `ConnectivityType: public`; AWS manages the address allocation, so there is no separately defined Elastic IP resource. |
 | `PrivateDefaultRoute` | `AWS::EC2::Route` | The default route (`0.0.0.0/0` via `NatGateway`) in the private route table. |
 | `EndpointSecurityGroup` | `AWS::EC2::SecurityGroup` | Permits HTTPS (port 443) from within the VPC CIDR to the interface VPC endpoints. Only inbound traffic from the VPC is allowed; no inbound from the internet. |
 | `EcrApiEndpoint` | `AWS::EC2::VPCEndpoint` (Interface) | VPC endpoint for `ecr.api`. ECS Fargate tasks in private subnets call ECR API calls (authenticate, describe images) through this endpoint instead of routing via NAT. Eliminates NAT data-transfer cost for ECR API traffic and keeps ECR API calls inside the AWS network. |
@@ -108,7 +107,7 @@ Creates the container registry and the OIDC role the **app** repo uses to push i
 | Resource (logical ID) | AWS Type | Why it exists |
 |---|---|---|
 | `EcrRepository` | `AWS::ECR::Repository` | The private Docker registry for the application image. Named `ecs-ci-cd-app`. Image tags are **immutable** — once a tag is pushed it cannot be overwritten, preventing silent image replacement. `ScanOnPush` is enabled for vulnerability scanning. Lifecycle policy keeps only the last 10 images, preventing unbounded storage growth. |
-| `GitHubActionsEcrPushRole` | `AWS::IAM::Role` | OIDC-federated role assumed by the **app-repo** GitHub Actions workflow (`repo:Adamsmiracle/cloudformation_infra:*`). Its permission policy covers: ECR authentication and image push; S3 `PutObject` on the pipeline artifact bucket (to upload `deploy-bundle.zip`); and `codepipeline:StartPipelineExecution` to trigger the deployment pipeline after the image is pushed. This role replaces long-lived AWS access keys. |
+| `GitHubActionsEcrPushRole` | `AWS::IAM::Role` | OIDC-federated role assumed by the **app-repo** GitHub Actions workflow (`repo:Adamsmiracle/aws_lab_applications:*`). Its permission policy covers: ECR authentication and image push; S3 `PutObject` on the pipeline artifact bucket (to upload `deploy-bundle.zip`); and `codepipeline:StartPipelineExecution` to trigger the deployment pipeline after the image is pushed. This role replaces long-lived AWS access keys. |
 
 ---
 
@@ -129,7 +128,7 @@ Creates the public entry point, all compute resources, IAM task roles, logging, 
 | `TaskRole` | `AWS::IAM::Role` | IAM role assumed by the **container process** at runtime. It grants `ssmmessages:*` actions, enabling ECS Exec (interactive shell into containers). Any application-level AWS calls the container makes would also use this role. |
 | `LogGroup` | `AWS::Logs::LogGroup` | CloudWatch Logs group `/ecs/ecs-ci-cd`. Container stdout/stderr streams land here via the `awslogs` log driver. Retention is 14 days to control storage costs. |
 | `Cluster` | `AWS::ECS::Cluster` | The ECS cluster `ecs-ci-cd-cluster`. Container Insights is enabled for CloudWatch metrics (CPU, memory, network per task). |
-| `TaskDefinition` | `AWS::ECS::TaskDefinition` | Blueprint for a Fargate task: 512 CPU units (0.5 vCPU), 1024 MB memory, Linux/x86_64. Contains one container (`app`) mapped to port 80. The initial image is a public nginx placeholder; CodeDeploy replaces it with the real image on the first deployment. |
+| `TaskDefinition` | `AWS::ECS::TaskDefinition` | Blueprint for a Fargate task: 512 CPU units (0.5 vCPU), 1024 MB memory, Linux/x86_64. Contains one container (`app`) mapped to the container port (`8080` by default, matching the Spring Boot app). The initial image is a public nginx placeholder; CodeDeploy replaces it with the real image on the first deployment. |
 | `Service` | `AWS::ECS::Service` | The ECS service `ecs-ci-cd-service`. Keeps 1 running task (desired) in private subnets across AZs. Deployment controller is `CODE_DEPLOY` — this locks CodeDeploy as the exclusive deployment mechanism, preventing CloudFormation and ECS from competing to update the task definition. `EnableExecuteCommand: true` enables ECS Exec. |
 | `ScalableTarget` | `AWS::ApplicationAutoScaling::ScalableTarget` | Registers the ECS service's task count as an Auto Scaling dimension, allowing it to scale between 1 (min) and 4 (max) tasks. |
 | `CpuScalingPolicy` | `AWS::ApplicationAutoScaling::ScalingPolicy` | Target-tracking policy that adjusts task count to keep average CPU utilization at 60%. Scale-out and scale-in cooldowns are both 60 seconds to avoid thrashing. |
@@ -147,7 +146,7 @@ Creates the deployment automation: the S3 artifact store, IAM roles, and the Cod
 | `CodeDeployRole` | `AWS::IAM::Role` | IAM role assumed by CodeDeploy. Carries `AWSCodeDeployRoleForECS`, which allows CodeDeploy to register task definitions, update ECS services, and manipulate ALB listener rules during a blue/green swap. |
 | `CodePipelineRole` | `AWS::IAM::Role` | IAM role assumed by CodePipeline. Permissions are least-privilege: read/write only to `ArtifactBucket`; create-deployment and describe actions on the specific CodeDeploy application and deployment group; ECS describe/update on the specific service; `iam:PassRole` scoped to roles named `ecs-ci-cd-*` passed only to `ecs-tasks.amazonaws.com`. |
 | `CodeDeployApp` | `AWS::CodeDeploy::Application` | The CodeDeploy application `ecs-ci-cd-cd-app`. The compute platform is `ECS`, which enables blue/green deployment semantics for ECS services. |
-| `CodeDeployDeploymentGroup` | `AWS::CodeDeploy::DeploymentGroup` | Wires CodeDeploy to the ECS service and ALB. Deployment type is `BLUE_GREEN` with traffic control. Configuration: on new deploy, start routing traffic to the green environment; if not approved within 60 minutes, stop the deployment. After successful traffic shift, terminate old (blue) tasks after 5 minutes. Auto-rollback is enabled on deployment failure or alarm. Uses `CodeDeployDefault.ECSAllAtOnce` — all tasks are replaced simultaneously. |
+| `CodeDeployDeploymentGroup` | `AWS::CodeDeploy::DeploymentGroup` | Wires CodeDeploy to the ECS service and ALB. Deployment type is `BLUE_GREEN` with traffic control. Configuration: on new deploy, start routing traffic to the green environment; if not approved within 60 minutes, stop the deployment. After successful traffic shift, terminate old (blue) tasks after 5 minutes. Auto-rollback is enabled on deployment failure or alarm. Uses `CodeDeployDefault.ECSLinear10PercentEvery1Minutes` — traffic shifts to green in 10% increments every minute. |
 | `Pipeline` | `AWS::CodePipeline::Pipeline` | Two-stage pipeline `ecs-ci-cd-pipeline`. **Source** stage: monitors the artifact bucket for `deploy-bundle.zip` (`PollForSourceChanges: false` — the app workflow triggers it explicitly with `StartPipelineExecution`). **Deploy** stage: invokes `CodeDeployToECS` provider using the `taskdef.json`, `appspec.yaml`, and `imageDetail.json` files from the deploy bundle. |
 
 ---
@@ -348,7 +347,7 @@ CodePipeline — Deploy Stage (CodeDeployToECS provider)
 │  │  ┌──────────────────┐   │  │  ┌──────────────────────────┐   │  │
 │  │  │  ALB ENI         │   │  │  │  ALB ENI                 │   │  │
 │  │  └──────────────────┘   │  │  └──────────────────────────┘   │  │
-│  │  NatGateway + EIP        │  │                                 │  │
+│  │  (regional NAT Gateway spans both AZs — AWS-managed address)    │  │
 │  └──────────────────────────┘  └─────────────────────────────────┘  │
 │           │  (routes via IGW → internet users)                       │
 │           │                                                          │
