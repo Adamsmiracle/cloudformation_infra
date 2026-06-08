@@ -81,7 +81,9 @@ Resources:
     Properties:
       Name: !Sub "${ProjectName}-tg-blue"
       VpcId: !Ref VpcId
-      Port: !Ref ContainerPort
+      Port: 80          # TG port is cosmetic for ECS IP targets — ECS registers tasks at the
+                        # container port (ContainerPort) and health-checks there. Kept at 80 to
+                        # match the live target group and avoid replacement (Port is immutable).
       Protocol: HTTP
       TargetType: ip
       HealthCheckPath: /
@@ -97,7 +99,7 @@ Resources:
     Properties:
       Name: !Sub "${ProjectName}-tg-green"
       VpcId: !Ref VpcId
-      Port: !Ref ContainerPort
+      Port: 80          # See TargetGroupBlue: kept at 80 to avoid immutable-Port replacement.
       Protocol: HTTP
       TargetType: ip
       HealthCheckPath: /
