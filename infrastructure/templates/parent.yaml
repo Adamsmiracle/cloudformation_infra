@@ -33,7 +33,11 @@ Parameters:
   MinCapacity:              { Type: Number, Default: 1 }
   MaxCapacity:              { Type: Number, Default: 4 }
   CpuTargetUtilization:     { Type: Number, Default: 60 }
-  InitialImage:             { Type: String, Default: public.ecr.aws/nginx/nginx:stable }
+  # Bootstrap placeholder only — must listen on ContainerPort (8080) so the ECS service
+  # passes ALB health checks on first create. CodeDeploy ships the real app afterward.
+  # nginx-unprivileged listens on 8080 by design (stock nginx listens on 80 and would
+  # fail the 8080 health check, leaving the service unable to stabilize).
+  InitialImage:             { Type: String, Default: public.ecr.aws/nginx/nginx-unprivileged:stable }
 
   # ---- Cache-busting (bumped by GitHub Actions on every template upload
   # so that CFN re-evaluates the nested children even though their S3
