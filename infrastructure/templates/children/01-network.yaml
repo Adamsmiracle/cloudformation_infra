@@ -105,6 +105,7 @@ Resources:
 
   NatGateway:
     Type: AWS::EC2::NatGateway
+    DependsOn: AttachGateway   # regional NAT auto-creates its route to the IGW; ensure it's attached first
     Properties:
       ConnectivityType: public
       AvailabilityMode: regional
