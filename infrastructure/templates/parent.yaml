@@ -33,12 +33,9 @@ Parameters:
   MinCapacity:              { Type: Number, Default: 1 }
   MaxCapacity:              { Type: Number, Default: 4 }
   CpuTargetUtilization:     { Type: Number, Default: 60 }
-  # Bootstrap image, used ONLY when the service is first created — it must listen on
-  # ContainerPort (8080) so the service passes ALB health checks. nginx-unprivileged
-  # serves on 8080 by design. DO NOT change this to deploy the real app: the service is
-  # CODE_DEPLOY-controlled, so CloudFormation cannot update its task definition. The real
-  # app is shipped via CodeDeploy (pipeline, or a manual `aws deploy create-deployment`).
-  InitialImage:             { Type: String, Default: public.ecr.aws/nginx/nginx-unprivileged:stable }
+  # Image used when the ECS service/task definition is first created. Must listen on
+  # ContainerPort (8080) to pass ALB health checks.
+  InitialImage:             { Type: String, Default: "825765391206.dkr.ecr.eu-central-1.amazonaws.com/ecs-ci-cd-app:latest" }
 
   # ---- Cache-busting (bumped by GitHub Actions on every template upload
   # so that CFN re-evaluates the nested children even though their S3
