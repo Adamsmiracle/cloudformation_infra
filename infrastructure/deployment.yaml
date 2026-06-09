@@ -7,6 +7,6 @@ parameters:
   GitHubOrg: Adamsmiracle
   AppRepoName: aws_lab_applications
   # ---- Initial value; GitHub Actions bumps it on each upload ----
-  TemplateVersion: sha-5e694d7
+  TemplateVersion: sha-b70af7e
 tags:
   Project: ecs-ci-cd
