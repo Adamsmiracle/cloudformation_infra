@@ -239,7 +239,9 @@ Resources:
         DeploymentType: BLUE_GREEN
         DeploymentOption: WITH_TRAFFIC_CONTROL
       BlueGreenDeploymentConfiguration:
-        DeploymentReadyOption: { ActionOnTimeout: STOP_DEPLOYMENT, WaitTimeInMinutes: 60 }
+        # CONTINUE_DEPLOYMENT = shift traffic automatically once green is healthy,
+        # with no manual "Reroute traffic" approval gate (fully automated CI/CD).
+        DeploymentReadyOption: { ActionOnTimeout: CONTINUE_DEPLOYMENT }
         TerminateBlueInstancesOnDeploymentSuccess: { Action: TERMINATE, TerminationWaitTimeInMinutes: 5 }
       AutoRollbackConfiguration:
         Enabled: true
@@ -291,6 +293,10 @@ Resources:
             - SUCCESS
           repository-name:
             - !Ref EcrRepositoryName
+          # Only the `latest` tag triggers a deploy. The app workflow also pushes a
+          # per-build <sha> tag; without this filter every push would fire twice.
+          image-tag:
+            - latest
       State: ENABLED
       Targets:
         - Id: TriggerPipeline
