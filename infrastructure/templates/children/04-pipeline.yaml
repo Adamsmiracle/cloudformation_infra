@@ -254,7 +254,7 @@ Resources:
               - { Name: !Ref TargetGroupBlueName }
               - { Name: !Ref TargetGroupGreenName }
             ProdTrafficRoute: { ListenerArns: [!Ref HttpListenerArn] }
-      DeploymentConfigName: CodeDeployDefault.ECSLinear10PercentEvery1Minutes
+      DeploymentConfigName: CodeDeployDefault.ECSAllAtOnce
 
   # ---- EventBridge ----
   EventBridgePipelineRole:
