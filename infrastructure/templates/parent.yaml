@@ -33,9 +33,11 @@ Parameters:
   MinCapacity:              { Type: Number, Default: 1 }
   MaxCapacity:              { Type: Number, Default: 4 }
   CpuTargetUtilization:     { Type: Number, Default: 60 }
-  # Image used when the ECS service/task definition is first created. Must listen on
-  # ContainerPort (8080) to pass ALB health checks.
-  InitialImage:             { Type: String, Default: "825765391206.dkr.ecr.eu-central-1.amazonaws.com/ecs-ci-cd-app:latest" }
+  # Bootstrap image used ONLY when the service is first created. MUST be a public,
+  # always-available image that listens on ContainerPort (8080) — the private ECR repo
+  # is created empty by this same stack, so it has no app image yet at create time.
+  # The real app is deployed afterward via CodeDeploy (push image -> blue/green deploy).
+  InitialImage:             { Type: String, Default: public.ecr.aws/nginx/nginx-unprivileged:stable }
 
   # ---- Cache-busting (bumped by GitHub Actions on every template upload
   # so that CFN re-evaluates the nested children even though their S3
@@ -131,6 +133,11 @@ Resources:
         TargetGroupGreenName: !GetAtt AlbEcsStack.Outputs.TargetGroupGreenName
         HttpListenerArn:      !GetAtt AlbEcsStack.Outputs.HttpListenerArn
         EcrRepositoryName:    !GetAtt EcrStack.Outputs.EcrRepositoryName
+        TaskExecutionRoleArn: !GetAtt AlbEcsStack.Outputs.TaskExecutionRoleArn
+        TaskRoleArn:          !GetAtt AlbEcsStack.Outputs.TaskRoleArn
+        ContainerPort:        !Ref ContainerPort
+        ContainerCpu:         !Ref ContainerCpu
+        ContainerMemory:      !Ref ContainerMemory
         TemplateVersion:      !Ref TemplateVersion
       Tags:
         - { Key: Project, Value: !Ref ProjectName }
@@ -148,5 +155,5 @@ Outputs:
   PipelineName:
     Value: !GetAtt PipelineStack.Outputs.PipelineName
   ArtifactBucket:
-    Description: Upload deploy-bundle.zip here, then call StartPipelineExecution
+    Description: CodePipeline artifact store (managed by the pipeline; nothing to upload manually)
     Value: !GetAtt PipelineStack.Outputs.ArtifactBucket

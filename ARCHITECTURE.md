@@ -31,7 +31,7 @@ The lab delivers a fullstack Java web application running on AWS ECS Fargate wit
 | Path | Trigger | What happens |
 |---|---|---|
 | **Infra path** | Push to `infra-repo` → GitHub Actions | Child templates are uploaded to S3; `deployment.yaml` is bumped; CloudFormation GitSync picks up the change and updates the nested stacks |
-| **App path** | Push to `app-repo` → GitHub Actions | Docker image is built and pushed to ECR; `deploy-bundle.zip` is uploaded to S3; CodePipeline is triggered and CodeDeploy performs a blue/green swap on the ECS service |
+| **App path** | Push to `app-repo` → GitHub Actions | Docker image is built and pushed to ECR (tagged `<sha>` and `latest`); the ECR push event fires an EventBridge rule that starts CodePipeline; the pipeline pulls the image from ECR, a CodeBuild stage generates `taskdef.json` + `appspec.yaml`, and CodeDeploy performs a blue/green swap on the ECS service |
 
 All AWS interactions from GitHub Actions use OIDC (`AssumeRoleWithWebIdentity`). No long-lived access keys exist anywhere in the CI/CD chain.
 
@@ -106,8 +106,8 @@ Creates the container registry and the OIDC role the **app** repo uses to push i
 
 | Resource (logical ID) | AWS Type | Why it exists |
 |---|---|---|
-| `EcrRepository` | `AWS::ECR::Repository` | The private Docker registry for the application image. Named `ecs-ci-cd-app`. Image tags are **immutable** — once a tag is pushed it cannot be overwritten, preventing silent image replacement. `ScanOnPush` is enabled for vulnerability scanning. Lifecycle policy keeps only the last 10 images, preventing unbounded storage growth. |
-| `GitHubActionsEcrPushRole` | `AWS::IAM::Role` | OIDC-federated role assumed by the **app-repo** GitHub Actions workflow (`repo:Adamsmiracle/aws_lab_applications:*`). Its permission policy covers: ECR authentication and image push; S3 `PutObject` on the pipeline artifact bucket (to upload `deploy-bundle.zip`); and `codepipeline:StartPipelineExecution` to trigger the deployment pipeline after the image is pushed. This role replaces long-lived AWS access keys. |
+| `EcrRepository` | `AWS::ECR::Repository` | The private Docker registry for the application image. Named `ecs-ci-cd-app`. Tag mutability is **`MUTABLE`** so the app workflow can re-push the `latest` tag on every build — the CodePipeline ECR source action tracks `latest`. Per-build immutability is still provided by the unique commit-SHA tag pushed alongside `latest`. `ScanOnPush` is enabled for vulnerability scanning. Lifecycle policy keeps only the last 10 images, preventing unbounded storage growth. |
+| `GitHubActionsEcrPushRole` | `AWS::IAM::Role` | OIDC-federated role assumed by the **app-repo** GitHub Actions workflow (`repo:Adamsmiracle/aws_lab_applications:*`). Its permission policy is scoped to **ECR push only** (authenticate + upload layers + `PutImage`). The workflow no longer uploads to S3 or starts the pipeline — EventBridge triggers the pipeline and CodeBuild generates the deploy files — so those permissions were removed. This role replaces long-lived AWS access keys. |
 
 ---
 
@@ -141,13 +141,17 @@ Creates the deployment automation: the S3 artifact store, IAM roles, and the Cod
 
 | Resource (logical ID) | AWS Type | Why it exists |
 |---|---|---|
-| `ArtifactBucket` | `AWS::S3::Bucket` | S3 bucket `ecs-ci-cd-pipeline-artifacts-<account>-<region>` that acts as the pipeline's artifact store. The app-repo GitHub Actions workflow uploads `deploy-bundle.zip` here. CodePipeline reads from it. Versioning is enabled so CodePipeline can reference specific object versions. Lifecycle rules expire current versions after 30 days and non-current versions after 7 days. |
-| `ArtifactBucketPolicy` | `AWS::S3::BucketPolicy` | Denies all non-TLS (`aws:SecureTransport: false`) requests to the artifact bucket. Ensures deploy artifacts are never transferred unencrypted. |
+| `ArtifactBucket` | `AWS::S3::Bucket` | S3 bucket `ecs-ci-cd-pipeline-artifacts-<account>-<region>` that acts as CodePipeline's internal artifact store (passing artifacts between the Source, Build, and Deploy stages). It is managed entirely by the pipeline — nothing is uploaded to it manually. Versioning is enabled; lifecycle rules expire current versions after 30 days and non-current versions after 7 days. |
+| `ArtifactBucketPolicy` | `AWS::S3::BucketPolicy` | Denies all non-TLS (`aws:SecureTransport: false`) requests to the artifact bucket. Ensures pipeline artifacts are never transferred unencrypted. |
+| `CodeBuildRole` | `AWS::IAM::Role` | IAM role assumed by the CodeBuild project. Least-privilege: write to its own CloudWatch Logs group, and read/write the pipeline artifact bucket objects. |
+| `DeployFilesProject` | `AWS::CodeBuild::Project` | CodeBuild project `ecs-ci-cd-deploy-files`. Runs in the **Build** stage and generates the two deployment files at deploy time: `taskdef.json` (built with `jq`, with `<IMAGE1_NAME>` as the image placeholder) and `appspec.yaml`. The task execution/task role ARNs, container name (`app`), port, CPU, and memory are injected as environment variables so the generated task definition always matches the ECS stack. This is why the **app repo never needs to know any infra details**. |
 | `CodeDeployRole` | `AWS::IAM::Role` | IAM role assumed by CodeDeploy. Carries `AWSCodeDeployRoleForECS`, which allows CodeDeploy to register task definitions, update ECS services, and manipulate ALB listener rules during a blue/green swap. |
-| `CodePipelineRole` | `AWS::IAM::Role` | IAM role assumed by CodePipeline. Permissions are least-privilege: read/write only to `ArtifactBucket`; create-deployment and describe actions on the specific CodeDeploy application and deployment group; ECS describe/update on the specific service; `iam:PassRole` scoped to roles named `ecs-ci-cd-*` passed only to `ecs-tasks.amazonaws.com`. |
+| `CodePipelineRole` | `AWS::IAM::Role` | IAM role assumed by CodePipeline. Permissions are least-privilege: read/write only to `ArtifactBucket`; create-deployment and describe actions on the specific CodeDeploy application and deployment group; ECS describe/update on the specific service; `iam:PassRole` scoped to roles named `ecs-ci-cd-*` passed only to `ecs-tasks.amazonaws.com`; `ecr:DescribeImages` for the ECR source action; and `codebuild:StartBuild`/`BatchGetBuilds`/`StopBuild` on `DeployFilesProject`. |
 | `CodeDeployApp` | `AWS::CodeDeploy::Application` | The CodeDeploy application `ecs-ci-cd-cd-app`. The compute platform is `ECS`, which enables blue/green deployment semantics for ECS services. |
 | `CodeDeployDeploymentGroup` | `AWS::CodeDeploy::DeploymentGroup` | Wires CodeDeploy to the ECS service and ALB. Deployment type is `BLUE_GREEN` with traffic control. Configuration: on new deploy, start routing traffic to the green environment; if not approved within 60 minutes, stop the deployment. After successful traffic shift, terminate old (blue) tasks after 5 minutes. Auto-rollback is enabled on deployment failure or alarm. Uses `CodeDeployDefault.ECSLinear10PercentEvery1Minutes` — traffic shifts to green in 10% increments every minute. |
-| `Pipeline` | `AWS::CodePipeline::Pipeline` | Two-stage pipeline `ecs-ci-cd-pipeline`. **Source** stage: monitors the artifact bucket for `deploy-bundle.zip` (`PollForSourceChanges: false` — the app workflow triggers it explicitly with `StartPipelineExecution`). **Deploy** stage: invokes `CodeDeployToECS` provider using the `taskdef.json`, `appspec.yaml`, and `imageDetail.json` files from the deploy bundle. |
+| `Pipeline` | `AWS::CodePipeline::Pipeline` | Three-stage pipeline `ecs-ci-cd-pipeline`. **Source** stage: ECR provider tracking the `latest` tag of `ecs-ci-cd-app` — emits an `ImageArtifact` containing the auto-generated `imageDetail.json`. **Build** stage: runs `DeployFilesProject` (CodeBuild) to produce `taskdef.json` + `appspec.yaml` as `DeployArtifact`. **Deploy** stage: invokes `CodeDeployToECS` using `taskdef.json`/`appspec.yaml` from `DeployArtifact` and the image URI from `ImageArtifact` (`Image1ContainerName: IMAGE1_NAME`). |
+| `EventBridgePipelineRole` | `AWS::IAM::Role` | IAM role assumed by EventBridge to start the pipeline. Grants only `codepipeline:StartPipelineExecution` on this pipeline. |
+| `EcrImagePushRule` | `AWS::Events::Rule` | EventBridge rule matching `source: aws.ecr`, `detail-type: ECR Image Action`, `action-type: PUSH`, `result: SUCCESS`, `repository-name: ecs-ci-cd-app`. On match it calls `StartPipelineExecution` on the pipeline — this is what links an image push to a deployment. |
 
 ---
 
@@ -174,7 +178,10 @@ Parent
  └─ PipelineStack
       Inputs FROM AlbEcsStack: ClusterName, ServiceName,
                                TargetGroupBlueName, TargetGroupGreenName,
-                               HttpListenerArn
+                               HttpListenerArn, TaskExecutionRoleArn, TaskRoleArn
+      Inputs FROM EcrStack:    EcrRepositoryName
+      (ContainerPort/Cpu/Memory passed from the parent — injected into CodeBuild
+       so the generated taskdef.json matches the ECS task definition)
 ```
 
 ### 4.2 Runtime Connections
@@ -188,10 +195,11 @@ Parent
 | ECS tasks | `LogsEndpoint` | Container log delivery to CloudWatch (HTTPS:443) |
 | ECS tasks | `SecretsManagerEndpoint` | Secret retrieval (HTTPS:443, if used) |
 | ECS tasks | `SsmMessagesEndpoint` | ECS Exec / interactive sessions (HTTPS:443) |
-| GitHub Actions (app-repo) | `EcrRepository` via `GitHubActionsEcrPushRole` | Docker push (OIDC → STS → ECR) |
-| GitHub Actions (app-repo) | `ArtifactBucket` via `GitHubActionsEcrPushRole` | Upload `deploy-bundle.zip` |
-| GitHub Actions (app-repo) | `Pipeline` via `GitHubActionsEcrPushRole` | `StartPipelineExecution` API call |
-| `Pipeline` | `CodeDeployDeploymentGroup` | Invokes `CodeDeployToECS` action with deploy bundle |
+| GitHub Actions (app-repo) | `EcrRepository` via `GitHubActionsEcrPushRole` | Docker push of `<sha>` + `latest` (OIDC → STS → ECR) |
+| `EcrRepository` (image push event) | `EcrImagePushRule` → `Pipeline` | EventBridge rule calls `StartPipelineExecution` |
+| `Pipeline` (Source) | `EcrRepository` | ECR source action reads the `latest` image → `imageDetail.json` |
+| `Pipeline` (Build) | `DeployFilesProject` | CodeBuild generates `taskdef.json` + `appspec.yaml` |
+| `Pipeline` (Deploy) | `CodeDeployDeploymentGroup` | Invokes `CodeDeployToECS` with the generated files + image URI |
 | `CodeDeployDeploymentGroup` | `LoadBalancer` (`HttpListenerArn`) | Manipulates listener rules during traffic shift |
 | `CodeDeployDeploymentGroup` | `Service` | Updates ECS service to the new task definition |
 | GitHub Actions (infra-repo) | `TemplatesBucket` via `InfraGitHubActionsRole` | Upload child `.yaml` templates |
@@ -236,46 +244,50 @@ GitHub Actions: sync-infra-templates.yml
 ### 5.2 Application Build & Image Push Workflow
 
 ```
-Developer pushes to app-repo (cloudformation_infra)
+Developer pushes to app-repo (aws_lab_applications, branch ecs-ci-cd)
     │
     ▼
 GitHub Actions: build-and-push workflow (in app-repo)
     ├─ 1. Configure AWS credentials via OIDC
     │       (assumes GitHubActionsEcrPushRole from ECR stack)
     │
-    ├─ 2. Build Docker image from application source
+    ├─ 2. Authenticate to ECR (ecr:GetAuthorizationToken)
     │
-    ├─ 3. Tag image with commit SHA (immutable tag)
+    ├─ 3. Build Docker image from application source
     │
-    ├─ 4. Authenticate to ECR
-    │       (ecr:GetAuthorizationToken)
+    ├─ 4. Tag image twice:
+    │       ├─ ecs-ci-cd-app:<sha>     (unique, immutable per-build reference)
+    │       └─ ecs-ci-cd-app:latest    (pointer the pipeline ECR source tracks)
     │
-    ├─ 5. Push image to EcrRepository
-    │       (ecs-ci-cd-app:<sha>)
-    │
-    ├─ 6. Assemble deploy-bundle.zip:
-    │       ├─ taskdef.json     (task definition with new image URI)
-    │       ├─ appspec.yaml     (CodeDeploy ECS deployment spec)
-    │       └─ imageDetail.json (image URI for CodeDeploy substitution)
-    │
-    ├─ 7. Upload deploy-bundle.zip to ArtifactBucket
-    │       (s3://ecs-ci-cd-pipeline-artifacts-…/deploy-bundle.zip)
-    │
-    └─ 8. Call codepipeline:StartPipelineExecution
+    └─ 5. Push both tags to EcrRepository
+            (pushing `latest` is what fires the EventBridge rule)
+
+The workflow stops here. It produces no deploy bundle and does not call
+StartPipelineExecution — the infra owns everything downstream.
 ```
 
 ### 5.3 Blue/Green Deployment Workflow
 
 ```
-codepipeline:StartPipelineExecution called (by GitHub Actions)
+ECR image push (latest) ──► EcrImagePushRule (EventBridge)
     │
-    ▼
-CodePipeline — Source Stage
-    └─ Reads deploy-bundle.zip from ArtifactBucket (by version ID)
+    └─ StartPipelineExecution
+        │
+        ▼
+CodePipeline — Source Stage (ECR provider)
+    └─ Reads the `latest` image from ecs-ci-cd-app
+        → emits ImageArtifact (contains imageDetail.json with the image URI)
+        │
+        ▼
+CodePipeline — Build Stage (CodeBuild: DeployFilesProject)
+    └─ Generates taskdef.json (image = <IMAGE1_NAME>) + appspec.yaml
+        → emits DeployArtifact
         │
         ▼
 CodePipeline — Deploy Stage (CodeDeployToECS provider)
     └─ Creates a CodeDeploy deployment
+       (taskdef.json/appspec.yaml from DeployArtifact;
+        <IMAGE1_NAME> replaced by the URI from ImageArtifact)
             │
             ▼
         CodeDeploy — Blue/Green Deployment
@@ -320,23 +332,19 @@ CodePipeline — Deploy Stage (CodeDeployToECS provider)
    TemplatesBucket ───────────►   EcrRepository (ECR)
    (child templates)                      │
           │                               │
-   CloudFormation                         │ image event
-   GitSync reads                          │
-   deployment.yaml                        │
-          │                               │
-          ▼                               │
-   Parent Stack Update                    │
-   (nested stacks)                        │
-                                          ▼
-┌──────────── ArtifactBucket ◄── GHA uploads deploy-bundle.zip ──────┐
-│                 │                                                    │
-│                 │ StartPipelineExecution                             │
-│                 ▼                                                    │
-│          CodePipeline (Source → Deploy)                             │
-│                 │                                                    │
-│                 ▼                                                    │
-│          CodeDeploy (Blue/Green ECS)                                │
-└─────────────────────────────────────────────────────────────────────┘
+   CloudFormation                         │ ECR push event (latest tag)
+   GitSync reads                          ▼
+   deployment.yaml             EcrImagePushRule (EventBridge)
+          │                               │ StartPipelineExecution
+          ▼                               ▼
+   Parent Stack Update         ┌─────────────────────────────────────────┐
+   (nested stacks)             │ CodePipeline                              │
+                               │  Source: ECR latest → imageDetail.json    │
+                               │     ▼                                     │
+                               │  Build:  CodeBuild → taskdef + appspec    │
+                               │     ▼                                     │
+                               │  Deploy: CodeDeploy (Blue/Green ECS)      │
+                               └─────────────────────────────────────────┘
                   │
                   ▼
 ┌───────────────── VPC (10.20.0.0/16) ────────────────────────────────┐
@@ -383,13 +391,14 @@ Internet users ──► ALB (public DNS) ──► TargetGroupBlue/Green ──
 | **OIDC scope pinned to repo** | `token.actions.githubusercontent.com:sub: repo:<org>/<repo>:*` condition on all OIDC roles. | Prevents other repos in the same org from assuming these roles. |
 | **ECS tasks in private subnets** | `AssignPublicIp: DISABLED`. Tasks have no public IPs. | Tasks are unreachable from the internet. The only inbound path is through the ALB. |
 | **ALB is the sole public entry point** | `AlbSecurityGroup` allows HTTP:80 from the internet. `ServiceSecurityGroup` allows inbound only from `AlbSecurityGroup`. | Defense in depth — no direct path to containers. |
-| **Immutable image tags** | `ImageTagMutability: IMMUTABLE` on ECR. | Prevents a tag (e.g., `latest`) from being silently overwritten to a different image. |
+| **Per-build immutable references** | Every image is tagged with its commit SHA (`ecs-ci-cd-app:<sha>`) in addition to `latest`. | The SHA tag is a permanent, unambiguous reference to exactly what was built, even though `latest` is mutable (mutable is required so the pipeline's ECR source can track a stable tag). |
 | **Image scanning on push** | `ScanOnPush: true` on ECR. | CVEs are surfaced immediately after build. |
 | **VPC endpoints for AWS services** | Interface endpoints for ECR, Logs, Secrets Manager, SSM; Gateway endpoint for S3. | ECR pulls, log shipping, and secret access never traverse the public internet or the NAT. |
 | **S3 buckets deny HTTP** | `DenyInsecureTransport` bucket policy on both `TemplatesBucket` and `ArtifactBucket`. | Templates and deploy artifacts cannot be read over unencrypted HTTP. |
 | **S3 buckets block all public access** | `PublicAccessBlockConfiguration` fully enabled on both buckets. | Prevents accidental public exposure of CFN templates or deploy artifacts. |
 | **ALB drops invalid headers** | `routing.http.drop_invalid_header_fields.enabled: true`. | Prevents HTTP header injection attacks reaching the containers. |
 | **Blue/green auto-rollback** | `AutoRollbackConfiguration` on `DEPLOYMENT_FAILURE` and `DEPLOYMENT_STOP_ON_ALARM`. | A bad deployment automatically reverts; production traffic stays on the healthy blue environment. |
-| **CodePipeline triggered explicitly** | `PollForSourceChanges: false`; pipeline started via `codepipeline:StartPipelineExecution` API call after upload. | Eliminates polling; the pipeline only runs when the app workflow intentionally triggers it after a successful image push. |
+| **Event-driven pipeline trigger** | `EcrImagePushRule` (EventBridge) starts the pipeline via `codepipeline:StartPipelineExecution` only on a successful ECR image push. | No polling and no broad app-repo permissions; the deployment is driven by the registry event itself, and the app role is scoped to ECR push only. |
+| **Deploy files generated in infra** | CodeBuild (`DeployFilesProject`) generates `taskdef.json`/`appspec.yaml` at deploy time from infra-controlled env vars. | The app repo never holds task/execution role ARNs, log group names, or sizing — infra details stay in the infra repo. |
 | **ECS Exec enabled** | `EnableExecuteCommand: true` + `SsmMessagesEndpoint` + `TaskRole` SSM permissions. | Engineers can open an interactive shell into containers for debugging via SSM (no SSH, no bastion needed). |
 | **Least-privilege IAM** | Each role (CodePipeline, CodeDeploy, TaskExecution, Task, InfraGHA, AppGHA) has only the permissions its principal actually needs, scoped to specific resource ARNs where possible. | Limits blast radius if any credential or service is compromised. |

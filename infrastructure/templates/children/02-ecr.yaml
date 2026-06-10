@@ -15,7 +15,10 @@ Resources:
     UpdateReplacePolicy: Retain
     Properties:
       RepositoryName: !Sub "${ProjectName}-app"
-      ImageTagMutability: IMMUTABLE
+      # MUTABLE so the app workflow can re-push the `latest` tag on every build.
+      # The CodePipeline ECR source action tracks `latest`; per-build immutability
+      # is still provided by the unique commit-SHA tag pushed alongside `latest`.
+      ImageTagMutability: MUTABLE
       ImageScanningConfiguration: { ScanOnPush: true }
       EncryptionConfiguration: { EncryptionType: AES256 }
       LifecyclePolicy:
@@ -52,6 +55,9 @@ Resources:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
               StringLike:
                 token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubOrg}/${AppRepoName}:*"
+      # The app workflow only builds and pushes the image. EventBridge (not the
+      # workflow) triggers the pipeline, and CodeBuild (not the workflow) generates
+      # the deploy files — so this role needs ECR push permissions only.
       Policies:
         - PolicyName: EcrPushPolicy
           PolicyDocument:
@@ -67,22 +73,7 @@ Resources:
                   - ecr:InitiateLayerUpload
                   - ecr:PutImage
                   - ecr:UploadLayerPart
-                  - ecr:BatchGetImage
-                  - ecr:DescribeImages
                 Resource: !GetAtt EcrRepository.Arn
-              - Effect: Allow
-                Action:
-                  - s3:PutObject
-                  - s3:GetBucketLocation
-                Resource:
-                  - !Sub "arn:aws:s3:::${ProjectName}-pipeline-artifacts-${AWS::AccountId}-${AWS::Region}"
-                  - !Sub "arn:aws:s3:::${ProjectName}-pipeline-artifacts-${AWS::AccountId}-${AWS::Region}/*"
-              - Effect: Allow
-                Action: codepipeline:StartPipelineExecution
-                Resource: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${ProjectName}-pipeline"
-              - Effect: Allow
-                Action: ecs:DescribeTaskDefinition
-                Resource: '*'
 
 Outputs:
   EcrRepositoryName:    { Value: !Ref EcrRepository }

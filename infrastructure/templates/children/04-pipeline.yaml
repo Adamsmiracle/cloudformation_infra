@@ -9,6 +9,12 @@ Parameters:
   TargetGroupGreenName: { Type: String }
   HttpListenerArn:      { Type: String }
   EcrRepositoryName:    { Type: String }
+  # Injected into CodeBuild so the generated taskdef.json matches the ECS stack.
+  TaskExecutionRoleArn: { Type: String }
+  TaskRoleArn:          { Type: String }
+  ContainerPort:        { Type: Number, Default: 8080 }
+  ContainerCpu:         { Type: Number, Default: 512 }
+  ContainerMemory:      { Type: Number, Default: 1024 }
   TemplateVersion:      { Type: String }
 
 Resources:
@@ -107,6 +113,114 @@ Resources:
                 Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-*"
                 Condition:
                   StringEqualsIfExists: { iam:PassedToService: ecs-tasks.amazonaws.com }
+              # Read the source image metadata (ECR source action).
+              - Effect: Allow
+                Action: [ecr:DescribeImages, ecr:GetAuthorizationToken]
+                Resource: '*'
+              # Drive the CodeBuild stage that generates taskdef.json + appspec.yaml.
+              - Effect: Allow
+                Action: [codebuild:StartBuild, codebuild:BatchGetBuilds, codebuild:StopBuild]
+                Resource: !GetAtt DeployFilesProject.Arn
+
+  # ---- CodeBuild (generates taskdef.json + appspec.yaml at deploy time) ----
+  # Keeping deploy-file generation here means the app repo never needs to know
+  # task role ARNs, the log group, CPU/memory, etc. The pipeline owns it.
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-codebuild-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{ Effect: Allow, Principal: { Service: codebuild.amazonaws.com }, Action: sts:AssumeRole }]
+      Policies:
+        - PolicyName: CodeBuildInline
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${ProjectName}-deploy-files:*"
+              - Effect: Allow
+                Action: [s3:GetObject, s3:GetObjectVersion, s3:PutObject]
+                Resource: !Sub "${ArtifactBucket.Arn}/*"
+
+  DeployFilesProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "${ProjectName}-deploy-files"
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Artifacts: { Type: CODEPIPELINE }
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:7.0
+        EnvironmentVariables:
+          - { Name: PROJECT_NAME,        Value: !Ref ProjectName }
+          - { Name: EXECUTION_ROLE_ARN,  Value: !Ref TaskExecutionRoleArn }
+          - { Name: TASK_ROLE_ARN,       Value: !Ref TaskRoleArn }
+          - { Name: CONTAINER_NAME,      Value: app }
+          - { Name: CONTAINER_PORT,      Value: !Ref ContainerPort }
+          - { Name: CONTAINER_CPU,       Value: !Ref ContainerCpu }
+          - { Name: CONTAINER_MEMORY,    Value: !Ref ContainerMemory }
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            build:
+              commands:
+                - |
+                  jq -n \
+                    --arg exec "$EXECUTION_ROLE_ARN" \
+                    --arg task "$TASK_ROLE_ARN" \
+                    --arg region "$AWS_DEFAULT_REGION" \
+                    --arg family "$PROJECT_NAME-task" \
+                    --arg loggroup "/ecs/$PROJECT_NAME" \
+                    --arg cname "$CONTAINER_NAME" \
+                    --argjson port "$CONTAINER_PORT" \
+                    --arg cpu "$CONTAINER_CPU" \
+                    --arg mem "$CONTAINER_MEMORY" \
+                    '{
+                      family: $family,
+                      networkMode: "awsvpc",
+                      requiresCompatibilities: ["FARGATE"],
+                      cpu: $cpu,
+                      memory: $mem,
+                      executionRoleArn: $exec,
+                      taskRoleArn: $task,
+                      runtimePlatform: { operatingSystemFamily: "LINUX", cpuArchitecture: "X86_64" },
+                      containerDefinitions: [{
+                        name: $cname,
+                        image: "<IMAGE1_NAME>",
+                        essential: true,
+                        portMappings: [{containerPort: $port, protocol: "tcp"}],
+                        logConfiguration: {
+                          logDriver: "awslogs",
+                          options: {
+                            "awslogs-group": $loggroup,
+                            "awslogs-region": $region,
+                            "awslogs-stream-prefix": "app"
+                          }
+                        }
+                      }]
+                    }' > taskdef.json
+                - |
+                  cat > appspec.yaml << EOF
+                  version: 0.0
+                  Resources:
+                    - TargetService:
+                        Type: AWS::ECS::Service
+                        Properties:
+                          TaskDefinition: <TASK_DEFINITION>
+                          LoadBalancerInfo:
+                            ContainerName: "$CONTAINER_NAME"
+                            ContainerPort: $CONTAINER_PORT
+                  EOF
+                - echo "Generated taskdef.json:"; cat taskdef.json
+          artifacts:
+            files:
+              - taskdef.json
+              - appspec.yaml
 
   # ---- CodeDeploy ----
   CodeDeployApp:
@@ -184,8 +298,10 @@ Resources:
           RoleArn: !GetAtt EventBridgePipelineRole.Arn
 
   # ---- CodePipeline ----
-  # GitHub Actions uploads deploy-bundle.zip (taskdef.json + appspec.yaml + imageDetail.json)
-  # to the artifact bucket. EventBridge then triggers this pipeline on ECR image push.
+  # Flow: app pushes image -> EventBridge fires on ECR push -> this pipeline runs.
+  #   Source  : pull the `latest` image metadata straight from ECR (imageDetail.json).
+  #   Build   : CodeBuild generates taskdef.json + appspec.yaml.
+  #   Deploy  : CodeDeploy blue/green swap on the ECS service.
   Pipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:
@@ -195,13 +311,22 @@ Resources:
       Stages:
         - Name: Source
           Actions:
-            - Name: S3Source
-              ActionTypeId: { Category: Source, Owner: AWS, Provider: S3, Version: '1' }
+            - Name: EcrSource
+              ActionTypeId: { Category: Source, Owner: AWS, Provider: ECR, Version: '1' }
               Configuration:
-                S3Bucket: !Ref ArtifactBucket
-                S3ObjectKey: deploy-bundle.zip
-                PollForSourceChanges: false
+                RepositoryName: !Ref EcrRepositoryName
+                ImageTag: latest
+              OutputArtifacts: [{ Name: ImageArtifact }]
+              RunOrder: 1
+        - Name: Build
+          Actions:
+            - Name: GenerateDeployFiles
+              ActionTypeId: { Category: Build, Owner: AWS, Provider: CodeBuild, Version: '1' }
+              Configuration:
+                ProjectName: !Ref DeployFilesProject
+              InputArtifacts: [{ Name: ImageArtifact }]
               OutputArtifacts: [{ Name: DeployArtifact }]
+              RunOrder: 1
         - Name: Deploy
           Actions:
             - Name: BlueGreenDeploy
@@ -213,9 +338,10 @@ Resources:
                 TaskDefinitionTemplatePath: taskdef.json
                 AppSpecTemplateArtifact: DeployArtifact
                 AppSpecTemplatePath: appspec.yaml
-                Image1ArtifactName: DeployArtifact
+                Image1ArtifactName: ImageArtifact
                 Image1ContainerName: IMAGE1_NAME
-              InputArtifacts: [{ Name: DeployArtifact }]
+              InputArtifacts: [{ Name: ImageArtifact }, { Name: DeployArtifact }]
+              RunOrder: 1
 
 Outputs:
   PipelineName:      { Value: !Ref Pipeline }
