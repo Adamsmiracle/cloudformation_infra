@@ -109,8 +109,6 @@ Resources:
                 Resource:
                   - !GetAtt TemplatesBucket.Arn
                   - !Sub "${TemplatesBucket.Arn}/*"
-              # After upload, trigger CFN to re-evaluate the parent stack
-              # (otherwise child template changes go unnoticed).
               - Effect: Allow
                 Action:
                   - cloudformation:UpdateStack

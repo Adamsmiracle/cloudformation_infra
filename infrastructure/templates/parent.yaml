@@ -33,15 +33,8 @@ Parameters:
   MinCapacity:              { Type: Number, Default: 1 }
   MaxCapacity:              { Type: Number, Default: 4 }
   CpuTargetUtilization:     { Type: Number, Default: 60 }
-  # Bootstrap image used ONLY when the service is first created. MUST be a public,
-  # always-available image that listens on ContainerPort (8080) — the private ECR repo
-  # is created empty by this same stack, so it has no app image yet at create time.
-  # The real app is deployed afterward via CodeDeploy (push image -> blue/green deploy).
   InitialImage:             { Type: String, Default: public.ecr.aws/nginx/nginx-unprivileged:stable }
 
-  # ---- Cache-busting (bumped by GitHub Actions on every template upload
-  # so that CFN re-evaluates the nested children even though their S3
-  # URLs are stable) ----
   TemplateVersion:
     Type: String
     Default: initial
@@ -70,7 +63,7 @@ Resources:
         - { Key: Layer,   Value: network }
 
   # -------------------------------------------------------------------------
-  # Child 2 — ECR + GitHub OIDC role (for the APP repo, not this one)
+  # Child 2 — ECR + GitHub OIDC role (for the APP repo)
   # -------------------------------------------------------------------------
   EcrStack:
     Type: AWS::CloudFormation::Stack
