@@ -50,8 +50,8 @@ Resources:
         - IpProtocol: tcp
           FromPort: 443
           ToPort: 443
-          CidrIp: 0.0.0.0/0
-          Description: HTTPS outbound (VPC endpoints + NAT) 
+          CidrIp: !Ref VpcCidr
+          Description: HTTPS outbound to VPC interface endpoints
       Tags: [{ Key: Name, Value: !Sub "${ProjectName}-svc-sg" }]
 
   ServiceIngressFromAlb:
@@ -138,18 +138,6 @@ Resources:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement: [{ Effect: Allow, Principal: { Service: ecs-tasks.amazonaws.com }, Action: sts:AssumeRole }]
-      Policies:
-        - PolicyName: ExecuteCommand
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - ssmmessages:CreateControlChannel
-                  - ssmmessages:CreateDataChannel
-                  - ssmmessages:OpenControlChannel
-                  - ssmmessages:OpenDataChannel
-                Resource: '*'
 
   # ---- Logs ----
   LogGroup:
@@ -206,7 +194,6 @@ Resources:
       PlatformVersion: LATEST
       DeploymentController: { Type: CODE_DEPLOY }
       DeploymentConfiguration: { MinimumHealthyPercent: 100, MaximumPercent: 200 }
-      EnableExecuteCommand: true
       PropagateTags: SERVICE
       NetworkConfiguration:
         AwsvpcConfiguration:
