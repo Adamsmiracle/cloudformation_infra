@@ -81,7 +81,7 @@ Resources:
     Properties:
       Name: !Sub "${ProjectName}-tg-blue"
       VpcId: !Ref VpcId
-      Port: 80
+      Port: !Ref ContainerPort
       Protocol: HTTP
       TargetType: ip
       HealthCheckPath: /
@@ -97,7 +97,7 @@ Resources:
     Properties:
       Name: !Sub "${ProjectName}-tg-green"
       VpcId: !Ref VpcId
-      Port: 80          
+      Port: !Ref ContainerPort        
       Protocol: HTTP
       TargetType: ip
       HealthCheckPath: /
