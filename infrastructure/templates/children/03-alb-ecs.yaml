@@ -194,6 +194,7 @@ Resources:
       PlatformVersion: LATEST
       DeploymentController: { Type: CODE_DEPLOY }
       DeploymentConfiguration: { MinimumHealthyPercent: 100, MaximumPercent: 200 }
+      EnableExecuteCommand: true
       PropagateTags: SERVICE
       NetworkConfiguration:
         AwsvpcConfiguration:
