@@ -143,6 +143,8 @@ Resources:
                 Action: [s3:GetObject, s3:GetObjectVersion, s3:PutObject]
                 Resource: !Sub "${ArtifactBucket.Arn}/*"
 
+
+# keep them in application layer and reference 
   DeployFilesProject:
     Type: AWS::CodeBuild::Project
     Properties:

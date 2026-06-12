@@ -103,8 +103,22 @@ Resources:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties: { RouteTableId: !Ref PrivateRouteTable, SubnetId: !Ref PrivateSubnet2 }
 
-  # No NAT gateway: private subnets have no internet egress. All AWS-service
-  # traffic (ECR, S3, CloudWatch Logs, SSM) goes through the VPC endpoints below.
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    DependsOn: AttachGateway
+    Properties:
+      ConnectivityType: public
+      AvailabilityMode: regional
+      VpcId: !Ref Vpc
+      Tags: [{ Key: Name, Value: !Sub "${ProjectName}-nat" }]
+
+  PrivateDefaultRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
   EndpointSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
