@@ -9,6 +9,7 @@ Parameters:
   TargetGroupGreenName: { Type: String }
   HttpListenerArn:      { Type: String }
   EcrRepositoryName:    { Type: String }
+  # Injected into CodeBuild so the generated taskdef.json matches the ECS stack.
   TaskExecutionRoleArn: { Type: String }
   TaskRoleArn:          { Type: String }
   ContainerPort:        { Type: Number, Default: 8080 }
@@ -67,11 +68,7 @@ Resources:
       RoleName: !Sub "${ProjectName}-codedeploy-role"
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
-        Statement:  
-          - Effect: Allow
-            Principal: 
-              Service: codedeploy.amazonaws.com 
-            Action: sts:AssumeRole 
+        Statement: [{ Effect: Allow, Principal: { Service: codedeploy.amazonaws.com }, Action: sts:AssumeRole }]
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AWSCodeDeployRoleForECS
 
@@ -116,14 +113,18 @@ Resources:
                 Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-*"
                 Condition:
                   StringEqualsIfExists: { iam:PassedToService: ecs-tasks.amazonaws.com }
+              # Read the source image metadata (ECR source action).
               - Effect: Allow
                 Action: [ecr:DescribeImages, ecr:GetAuthorizationToken]
                 Resource: '*'
+              # Drive the CodeBuild stage that generates taskdef.json + appspec.yaml.
               - Effect: Allow
                 Action: [codebuild:StartBuild, codebuild:BatchGetBuilds, codebuild:StopBuild]
                 Resource: !GetAtt DeployFilesProject.Arn
 
-
+  # ---- CodeBuild (generates taskdef.json + appspec.yaml at deploy time) ----
+  # Keeping deploy-file generation here means the app repo never needs to know
+  # task role ARNs, the log group, CPU/memory, etc. The pipeline owns it.
   CodeBuildRole:
     Type: AWS::IAM::Role
     Properties:
@@ -143,8 +144,6 @@ Resources:
                 Action: [s3:GetObject, s3:GetObjectVersion, s3:PutObject]
                 Resource: !Sub "${ArtifactBucket.Arn}/*"
 
-
-# keep them in application layer and reference 
   DeployFilesProject:
     Type: AWS::CodeBuild::Project
     Properties:
@@ -240,6 +239,8 @@ Resources:
         DeploymentType: BLUE_GREEN
         DeploymentOption: WITH_TRAFFIC_CONTROL
       BlueGreenDeploymentConfiguration:
+        # CONTINUE_DEPLOYMENT = shift traffic automatically once green is healthy,
+        # with no manual "Reroute traffic" approval gate (fully automated CI/CD).
         DeploymentReadyOption: { ActionOnTimeout: CONTINUE_DEPLOYMENT }
         TerminateBlueInstancesOnDeploymentSuccess: { Action: TERMINATE, TerminationWaitTimeInMinutes: 5 }
       AutoRollbackConfiguration:
@@ -292,6 +293,8 @@ Resources:
             - SUCCESS
           repository-name:
             - !Ref EcrRepositoryName
+          # Only the `latest` tag triggers a deploy. The app workflow also pushes a
+          # per-build <sha> tag; without this filter every push would fire twice.
           image-tag:
             - latest
       State: ENABLED
@@ -301,6 +304,10 @@ Resources:
           RoleArn: !GetAtt EventBridgePipelineRole.Arn
 
   # ---- CodePipeline ----
+  # Flow: app pushes image -> EventBridge fires on ECR push -> this pipeline runs.
+  #   Source  : pull the `latest` image metadata straight from ECR (imageDetail.json).
+  #   Build   : CodeBuild generates taskdef.json + appspec.yaml.
+  #   Deploy  : CodeDeploy blue/green swap on the ECS service.
   Pipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:

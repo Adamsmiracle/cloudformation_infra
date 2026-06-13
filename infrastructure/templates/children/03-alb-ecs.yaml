@@ -50,8 +50,8 @@ Resources:
         - IpProtocol: tcp
           FromPort: 443
           ToPort: 443
-          CidrIp: !Ref VpcCidr
-          Description: HTTPS outbound to VPC interface endpoints
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS outbound (VPC endpoints + NAT) 
       Tags: [{ Key: Name, Value: !Sub "${ProjectName}-svc-sg" }]
 
   ServiceIngressFromAlb:
@@ -81,7 +81,9 @@ Resources:
     Properties:
       Name: !Sub "${ProjectName}-tg-blue"
       VpcId: !Ref VpcId
-      Port: 80
+      Port: 80          # TG port is cosmetic for ECS IP targets — ECS registers tasks at the
+                        # container port (ContainerPort) and health-checks there. Kept at 80 to
+                        # match the live target group and avoid replacement (Port is immutable).
       Protocol: HTTP
       TargetType: ip
       HealthCheckPath: /
@@ -97,7 +99,7 @@ Resources:
     Properties:
       Name: !Sub "${ProjectName}-tg-green"
       VpcId: !Ref VpcId
-      Port: 80        
+      Port: 80          # See TargetGroupBlue: kept at 80 to avoid immutable-Port replacement.
       Protocol: HTTP
       TargetType: ip
       HealthCheckPath: /
@@ -138,6 +140,18 @@ Resources:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement: [{ Effect: Allow, Principal: { Service: ecs-tasks.amazonaws.com }, Action: sts:AssumeRole }]
+      Policies:
+        - PolicyName: ExecuteCommand
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Resource: '*'
 
   # ---- Logs ----
   LogGroup:
