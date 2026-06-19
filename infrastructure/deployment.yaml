@@ -8,7 +8,7 @@ parameters:
   AppRepoName: aws_lab_applications
   # ---- CodeStar connection the pipeline uses to read taskdef.json + appspec.yaml
   # from the app repo. Create + authorize it once in the console, then paste the ARN. ----
-  GitHubConnectionArn: REPLACE_WITH_CODESTAR_CONNECTION_ARN
+  GitHubConnectionArn: arn:aws:codeconnections:eu-central-1:825765391206:connection/2f041339-b5b6-4ef0-a9fc-746481ad4e6f
   AppRepoBranch: ecs-ci-cd
   # ---- Initial value; GitHub Actions bumps it on each upload ----
   TemplateVersion: sha-55cf95a
