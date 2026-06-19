@@ -11,6 +11,6 @@ parameters:
   GitHubConnectionArn: REPLACE_WITH_CODESTAR_CONNECTION_ARN
   AppRepoBranch: ecs-ci-cd
   # ---- Initial value; GitHub Actions bumps it on each upload ----
-  TemplateVersion: sha-48f68ed
+  TemplateVersion: sha-55cf95a
 tags:
   Project: ecs-ci-cd
