@@ -15,9 +15,11 @@ Resources:
     UpdateReplacePolicy: Retain
     Properties:
       RepositoryName: !Sub "${ProjectName}-app"
-      # MUTABLE so the app workflow can re-push the `latest` tag on every build.
-      # The CodePipeline ECR source action tracks `latest`; per-build immutability
-      # is still provided by the unique commit-SHA tag pushed alongside `latest`.
+      # MUTABLE so the app workflow can overwrite the `latest` tag on every build;
+      # the CodePipeline ECR source action tracks `latest`. Note: no immutable
+      # per-build (<sha>) tag is pushed, so there is no tag-level rollback
+      # reference — CodeDeploy pins the resolved image digest in the task
+      # definition at deploy time instead.
       ImageTagMutability: MUTABLE
       ImageScanningConfiguration: { ScanOnPush: true }
       EncryptionConfiguration: { EncryptionType: AES256 }
@@ -56,8 +58,9 @@ Resources:
               StringLike:
                 token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubOrg}/${AppRepoName}:*"
       # The app workflow only builds and pushes the image. EventBridge (not the
-      # workflow) triggers the pipeline, and CodeBuild (not the workflow) generates
-      # the deploy files — so this role needs ECR push permissions only.
+      # workflow) triggers the pipeline on the ECR push, and the deploy files
+      # (taskdef.json + appspec.yaml) live in the app repo and are pulled by the
+      # pipeline's CodeStar source action — so this role needs ECR push perms only.
       Policies:
         - PolicyName: EcrPushPolicy
           PolicyDocument:

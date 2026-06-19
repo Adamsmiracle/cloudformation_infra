@@ -24,6 +24,11 @@ Parameters:
   # ---- GitHub / OIDC (for the APP-repo workflow) ----
   GitHubOrg:                { Type: String, Default: Adamsmiracle }
   AppRepoName:              { Type: String, Default: aws_lab_applications }
+  # CodeStar (GitHub) connection the pipeline uses to read taskdef.json +
+  # appspec.yaml from the app repo. Create it once in the console and authorize
+  # it, then pass its ARN here (Developer Tools > Settings > Connections).
+  GitHubConnectionArn:      { Type: String }
+  AppRepoBranch:            { Type: String, Default: ecs-ci-cd }
 
   # ---- ECS sizing ----
   ContainerPort:            { Type: Number, Default: 8080 }
@@ -133,11 +138,9 @@ Resources:
         TargetGroupGreenName: !GetAtt AlbEcsStack.Outputs.TargetGroupGreenName
         HttpListenerArn:      !GetAtt AlbEcsStack.Outputs.HttpListenerArn
         EcrRepositoryName:    !GetAtt EcrStack.Outputs.EcrRepositoryName
-        TaskExecutionRoleArn: !GetAtt AlbEcsStack.Outputs.TaskExecutionRoleArn
-        TaskRoleArn:          !GetAtt AlbEcsStack.Outputs.TaskRoleArn
-        ContainerPort:        !Ref ContainerPort
-        ContainerCpu:         !Ref ContainerCpu
-        ContainerMemory:      !Ref ContainerMemory
+        GitHubConnectionArn:  !Ref GitHubConnectionArn
+        AppRepoFullName:      !Sub "${GitHubOrg}/${AppRepoName}"
+        AppRepoBranch:        !Ref AppRepoBranch
         TemplateVersion:      !Ref TemplateVersion
       Tags:
         - { Key: Project, Value: !Ref ProjectName }
