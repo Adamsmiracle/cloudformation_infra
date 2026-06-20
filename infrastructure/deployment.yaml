@@ -11,6 +11,6 @@ parameters:
   GitHubConnectionArn: arn:aws:codeconnections:eu-central-1:825765391206:connection/2f041339-b5b6-4ef0-a9fc-746481ad4e6f
   AppRepoBranch: ecs-ci-cd
   # ---- Initial value; GitHub Actions bumps it on each upload ----
-  TemplateVersion: sha-55cf95a
+  TemplateVersion: sha-ba7e935
 tags:
   Project: ecs-ci-cd
