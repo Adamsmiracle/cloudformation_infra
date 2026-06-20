@@ -233,8 +233,6 @@ Resources:
                 FullRepositoryId: !Ref AppRepoFullName
                 BranchName: !Ref AppRepoBranch
                 OutputArtifactFormat: CODE_ZIP
-                # Off so a repo push doesn't double-trigger; the ECR push is the
-                # single trigger and reads whatever taskdef/appspec is current.
                 DetectChanges: false
               OutputArtifacts: [{ Name: SourceArtifact }]
               RunOrder: 1
