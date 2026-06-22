@@ -16,6 +16,7 @@ Parameters:
   MultiAZ:         { Type: String, AllowedValues: ['true', 'false'], Default: 'true' }
   TemplateVersion: { Type: String }
 
+
 Resources:
   # ---- Subnet group: RDS lives in the two private subnets (Multi-AZ) ----
   DbSubnetGroup:

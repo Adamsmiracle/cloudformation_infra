@@ -10,6 +10,7 @@ Parameters:
   ProjectName:     { Type: String }
   TemplateVersion: { Type: String }
 
+
 Resources:
   # ---- Private image bucket ----
   ImageBucket:

@@ -8,6 +8,7 @@ Description: Child stack — S3 → CodePipeline → CodeDeploy (ECS blue/green)
 # by the app repo's GitHub Actions workflow and read by the S3 source action —
 # no whole-repo CodeStar pull, so the source artifact stays tiny.
 
+
 Parameters:
   ProjectName:          { Type: String }
   ClusterName:          { Type: String }

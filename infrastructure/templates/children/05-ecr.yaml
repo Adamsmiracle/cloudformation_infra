@@ -8,6 +8,7 @@ Parameters:
   ProjectName:     { Type: String }
   TemplateVersion: { Type: String }
 
+
 Resources:
   EcrRepository:
     Type: AWS::ECR::Repository
