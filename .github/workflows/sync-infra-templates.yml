@@ -2,7 +2,7 @@ name: Sync Infrastructure Templates
 
 on:
   push:
-    branches: [ecs-ci-cd]
+    branches: [photo_upload]
     paths:
       - 'infrastructure/templates/parent.yaml'
       - 'infrastructure/templates/children/**'
