@@ -1,6 +1,12 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: Child stack — ALB + ECS Fargate (blue/green ready) + CPU autoscaling
 
+# Task IAM roles live in the IAM stack (02-iam.yaml) and arrive here as ARNs.
+# Security groups stay co-located with the workload they protect. This stack
+# also owns the RDS ingress rule (DB SG <- service SG on 5432): it's defined
+# here, not in the database stack, because this stack owns the service SG —
+# which avoids a cross-stack security-group dependency cycle.
+
 Parameters:
   ProjectName:          { Type: String }
   VpcId:                { Type: String }
@@ -17,6 +23,11 @@ Parameters:
   MaxCapacity:          { Type: Number }
   CpuTargetUtilization: { Type: Number }
   InitialImage:         { Type: String }
+  # IAM role ARNs from the IAM stack.
+  TaskExecutionRoleArn: { Type: String }
+  TaskRoleArn:          { Type: String }
+  # DB security group from the database stack (we add the ingress rule here).
+  DbSecurityGroupId:    { Type: String }
   TemplateVersion:      { Type: String }
 
 
@@ -51,7 +62,12 @@ Resources:
           FromPort: 443
           ToPort: 443
           CidrIp: 0.0.0.0/0
-          Description: HTTPS outbound (VPC endpoints + NAT) 
+          Description: HTTPS outbound (VPC endpoints + NAT)
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          DestinationSecurityGroupId: !Ref DbSecurityGroupId
+          Description: PostgreSQL to RDS
       Tags: [{ Key: Name, Value: !Sub "${ProjectName}-svc-sg" }]
 
   ServiceIngressFromAlb:
@@ -62,6 +78,18 @@ Resources:
       FromPort: !Ref ContainerPort
       ToPort: !Ref ContainerPort
       SourceSecurityGroupId: !Ref AlbSecurityGroup
+
+  # RDS ingress from the ECS tasks (5432). Defined here because this stack owns
+  # the service SG; the database stack created the DB SG with no inline ingress.
+  DbIngressFromService:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref DbSecurityGroupId
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref ServiceSecurityGroup
+      Description: PostgreSQL from ECS tasks
 
   # ---- ALB ----
   LoadBalancer:
@@ -107,7 +135,7 @@ Resources:
       Matcher: { HttpCode: 200 }
       TargetGroupAttributes:
         - Key: deregistration_delay.timeout_seconds
-          Value: '30' 
+          Value: '30'
 
   HttpListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
@@ -116,40 +144,8 @@ Resources:
       Port: 80
       Protocol: HTTP
       DefaultActions:
-        - Type: forward 
+        - Type: forward
           TargetGroupArn: !Ref TargetGroupBlue
-
-  # ---- IAM ----
-  TaskExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Sub "${ProjectName}-task-exec-role"
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement: [{ Effect: Allow, Principal: { Service: ecs-tasks.amazonaws.com }, Action: sts:AssumeRole }]
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
-
-
-  TaskRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Sub "${ProjectName}-task-role"
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement: [{ Effect: Allow, Principal: { Service: ecs-tasks.amazonaws.com }, Action: sts:AssumeRole }]
-      Policies:
-        - PolicyName: ExecuteCommand
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - ssmmessages:CreateControlChannel
-                  - ssmmessages:CreateDataChannel
-                  - ssmmessages:OpenControlChannel
-                  - ssmmessages:OpenDataChannel
-                Resource: '*'
 
   # ---- Logs ----
   LogGroup:
@@ -175,17 +171,17 @@ Resources:
       Memory: !Ref ContainerMemory
       NetworkMode: awsvpc
       RequiresCompatibilities: [FARGATE]
-      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
-      TaskRoleArn: !GetAtt TaskRole.Arn
+      ExecutionRoleArn: !Ref TaskExecutionRoleArn
+      TaskRoleArn: !Ref TaskRoleArn
       RuntimePlatform:
         OperatingSystemFamily: LINUX
         CpuArchitecture: X86_64
       ContainerDefinitions:
         - Name: app
           Image: !Ref InitialImage
-          PortMappings: 
-          - ContainerPort: !Ref ContainerPort 
-            Protocol: tcp 
+          PortMappings:
+          - ContainerPort: !Ref ContainerPort
+            Protocol: tcp
           Essential: true
           LogConfiguration:
             LogDriver: awslogs
@@ -243,8 +239,6 @@ Outputs:
   AlbDnsName:           { Value: !GetAtt LoadBalancer.DNSName }
   ClusterName:          { Value: !Ref Cluster }
   ServiceName:          { Value: !GetAtt Service.Name }
-  TaskExecutionRoleArn: { Value: !GetAtt TaskExecutionRole.Arn }
-  TaskRoleArn:          { Value: !GetAtt TaskRole.Arn }
   TargetGroupBlueName:  { Value: !GetAtt TargetGroupBlue.TargetGroupName }
   TargetGroupGreenName: { Value: !GetAtt TargetGroupGreen.TargetGroupName }
   HttpListenerArn:      { Value: !Ref HttpListener }

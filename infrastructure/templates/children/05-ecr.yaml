@@ -1,0 +1,46 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Child stack — ECR repository for the app image
+
+# The GitHub Actions OIDC push role that writes to this repo now lives in the
+# IAM stack (02-iam.yaml).
+
+Parameters:
+  ProjectName:     { Type: String }
+  TemplateVersion: { Type: String }
+
+Resources:
+  EcrRepository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      RepositoryName: !Sub "${ProjectName}-app"
+      # MUTABLE so the app workflow can overwrite the `latest` tag on every build;
+      # the CodePipeline ECR source action tracks `latest`. Note: no immutable
+      # per-build (<sha>) tag is pushed, so there is no tag-level rollback
+      # reference — CodeDeploy pins the resolved image digest in the task
+      # definition at deploy time instead.
+      ImageTagMutability: MUTABLE
+      ImageScanningConfiguration: { ScanOnPush: true }
+      EncryptionConfiguration: { EncryptionType: AES256 }
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep last 10 images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 10
+                },
+                "action": { "type": "expire" }
+              }
+            ]
+          }
+
+Outputs:
+  EcrRepositoryName: { Value: !Ref EcrRepository }
+  EcrRepositoryArn:  { Value: !GetAtt EcrRepository.Arn }
+  EcrRepositoryUri:  { Value: !GetAtt EcrRepository.RepositoryUri }

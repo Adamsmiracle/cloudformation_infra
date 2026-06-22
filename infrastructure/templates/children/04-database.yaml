@@ -1,0 +1,100 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Child stack — RDS PostgreSQL (Multi-AZ) for photo metadata. Runs in the
+  private subnets, reachable only from the ECS tasks. The master credentials
+  are generated and rotated by Secrets Manager (ManageMasterUserPassword);
+  the app reads the secret + connection details from SSM at startup.
+
+Parameters:
+  ProjectName:     { Type: String }
+  VpcId:           { Type: String }
+  PrivateSubnet1:  { Type: String }
+  PrivateSubnet2:  { Type: String }
+  DBInstanceClass: { Type: String, Default: db.t3.micro }
+  DBName:          { Type: String, Default: photogallery }
+  DBUsername:      { Type: String, Default: gallery_admin }
+  MultiAZ:         { Type: String, AllowedValues: ['true', 'false'], Default: 'true' }
+  TemplateVersion: { Type: String }
+
+Resources:
+  # ---- Subnet group: RDS lives in the two private subnets (Multi-AZ) ----
+  DbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Sub "${ProjectName} RDS subnet group (private)"
+      SubnetIds: [!Ref PrivateSubnet1, !Ref PrivateSubnet2]
+      Tags: [{ Key: Name, Value: !Sub "${ProjectName}-db-subnets" }]
+
+  # ---- DB security group ----
+  # No inline ingress: the rule allowing 5432 from the ECS service SG is created
+  # in the compute stack (which owns the service SG). Putting it here would need
+  # the service SG id from a later stack -> cross-stack cycle. Egress is locked
+  # down (RDS never initiates outbound connections).
+  DbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub "${ProjectName} RDS - ingress from ECS tasks only"
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 127.0.0.1/32
+          Description: No egress (RDS does not initiate connections)
+      Tags: [{ Key: Name, Value: !Sub "${ProjectName}-db-sg" }]
+
+  # ---- PostgreSQL instance ----
+  Database:
+    Type: AWS::RDS::DBInstance
+    # Lab: delete cleanly on teardown. For production use Snapshot.
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      DBInstanceIdentifier: !Sub "${ProjectName}-db"
+      Engine: postgres
+      # Major version only -> RDS selects the latest supported minor.
+      EngineVersion: "16"
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: "20"
+      StorageType: gp3
+      StorageEncrypted: true
+      MultiAZ: !Ref MultiAZ
+      DBName: !Ref DBName
+      MasterUsername: !Ref DBUsername
+      # Generates + rotates the master password in Secrets Manager. The secret
+      # ARN is exposed via !GetAtt Database.MasterUserSecret.SecretArn below.
+      ManageMasterUserPassword: true
+      DBSubnetGroupName: !Ref DbSubnetGroup
+      VPCSecurityGroups: [!Ref DbSecurityGroup]
+      PubliclyAccessible: false
+      BackupRetentionPeriod: 1
+      AutoMinorVersionUpgrade: true
+      DeletionProtection: false
+      Tags: [{ Key: Name, Value: !Sub "${ProjectName}-db" }]
+
+  # ---- App-config plane (SSM) ----
+  DbEndpointParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${ProjectName}/db-endpoint"
+      Type: String
+      Value: !GetAtt Database.Endpoint.Address
+
+  DbNameParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${ProjectName}/db-name"
+      Type: String
+      Value: !Ref DBName
+
+  DbSecretArnParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${ProjectName}/db-secret-arn"
+      Type: String
+      Value: !GetAtt Database.MasterUserSecret.SecretArn
+
+Outputs:
+  DbEndpointAddress: { Value: !GetAtt Database.Endpoint.Address }
+  DbEndpointPort:    { Value: !GetAtt Database.Endpoint.Port }
+  DbName:            { Value: !Ref DBName }
+  DbSecretArn:       { Value: !GetAtt Database.MasterUserSecret.SecretArn }
+  DbSecurityGroupId: { Value: !Ref DbSecurityGroup }

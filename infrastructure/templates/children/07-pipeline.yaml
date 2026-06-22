@@ -1,6 +1,13 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: Child stack — S3 → CodePipeline → CodeDeploy (ECS blue/green)
 
+# IAM roles (CodeDeploy, CodePipeline, EventBridge) live in the IAM stack
+# (02-iam.yaml) and arrive here as ARNs. Bucket policies stay with their bucket.
+#
+# Deploy files (taskdef.json + appspec.yaml) are published to DeploySourceBucket
+# by the app repo's GitHub Actions workflow and read by the S3 source action —
+# no whole-repo CodeStar pull, so the source artifact stays tiny.
+
 Parameters:
   ProjectName:          { Type: String }
   ClusterName:          { Type: String }
@@ -9,15 +16,14 @@ Parameters:
   TargetGroupGreenName: { Type: String }
   HttpListenerArn:      { Type: String }
   EcrRepositoryName:    { Type: String }
-  # taskdef.json + appspec.yaml now live in the app repo and are pulled via a
-  # CodeStar (GitHub) connection — the pipeline no longer generates them.
-  GitHubConnectionArn:  { Type: String }
-  AppRepoFullName:      { Type: String }    # e.g. Adamsmiracle/aws_lab_applications
-  AppRepoBranch:        { Type: String, Default: ecs-ci-cd }
+  # IAM role ARNs from the IAM stack.
+  CodeDeployRoleArn:    { Type: String }
+  CodePipelineRoleArn:  { Type: String }
+  EventBridgeRoleArn:   { Type: String }
   TemplateVersion:      { Type: String }
 
 Resources:
-  # ---- Artifact bucket ----
+  # ---- Pipeline artifact store (internal to CodePipeline) ----
   ArtifactBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Delete
@@ -42,7 +48,6 @@ Resources:
             NoncurrentVersionExpirationInDays: 7
             AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 }
 
-
   ArtifactBucketPolicy:
     Type: AWS::S3::BucketPolicy
     Properties:
@@ -60,66 +65,48 @@ Resources:
             Condition:
               Bool: { "aws:SecureTransport": "false" }
 
-  # ---- IAM ----
-  CodeDeployRole:
-    Type: AWS::IAM::Role
+  # ---- Deploy-source bucket: holds the taskdef.json + appspec.yaml bundle ----
+  # The app workflow uploads deploy-bundle.zip here; the S3 source action below
+  # reads it. Versioning is REQUIRED for a CodePipeline S3 source action.
+  DeploySourceBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
     Properties:
-      RoleName: !Sub "${ProjectName}-codedeploy-role"
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement: [{ Effect: Allow, Principal: { Service: codedeploy.amazonaws.com }, Action: sts:AssumeRole }]
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AWSCodeDeployRoleForECS
+      BucketName: !Sub "${ProjectName}-deploy-source-${AWS::AccountId}-${AWS::Region}"
+      VersioningConfiguration: { Status: Enabled }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+            BucketKeyEnabled: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireOldBundles
+            Status: Enabled
+            NoncurrentVersionExpirationInDays: 30
+            AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 }
 
-  CodePipelineRole:
-    Type: AWS::IAM::Role
+  DeploySourceBucketPolicy:
+    Type: AWS::S3::BucketPolicy
     Properties:
-      RoleName: !Sub "${ProjectName}-codepipeline-role"
-      AssumeRolePolicyDocument:
+      Bucket: !Ref DeploySourceBucket
+      PolicyDocument:
         Version: '2012-10-17'
-        Statement: [{ Effect: Allow, Principal: { Service: codepipeline.amazonaws.com }, Action: sts:AssumeRole }]
-      Policies:
-        - PolicyName: CodePipelineInline
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action: [s3:GetObject, s3:GetObjectVersion, s3:PutObject, s3:GetBucketLocation, s3:ListBucket, s3:GetBucketVersioning]
-                Resource:
-                  - !GetAtt ArtifactBucket.Arn
-                  - !Sub "${ArtifactBucket.Arn}/*"
-              - Effect: Allow
-                Action:
-                  - codedeploy:CreateDeployment
-                  - codedeploy:GetDeployment
-                  - codedeploy:GetDeploymentGroup
-                  - codedeploy:GetApplicationRevision
-                  - codedeploy:RegisterApplicationRevision
-                Resource:
-                  - !Sub "arn:aws:codedeploy:${AWS::Region}:${AWS::AccountId}:application:${ProjectName}-cd-app"
-                  - !Sub "arn:aws:codedeploy:${AWS::Region}:${AWS::AccountId}:deploymentgroup:${ProjectName}-cd-app/${ProjectName}-dg"
-              - Effect: Allow
-                Action: [codedeploy:GetApplication, codedeploy:GetDeploymentConfig]
-                Resource: '*'
-              - Effect: Allow
-                Action: [ecs:DescribeServices, ecs:UpdateService]
-                Resource: !Sub "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:service/${ClusterName}/${ServiceName}"
-              - Effect: Allow
-                Action: [ecs:DescribeTaskDefinition, ecs:RegisterTaskDefinition, ecs:DescribeTasks, ecs:ListTasks]
-                Resource: '*'
-              - Effect: Allow
-                Action: iam:PassRole
-                Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-*"
-                Condition:
-                  StringEqualsIfExists: { iam:PassedToService: ecs-tasks.amazonaws.com }
-              # Read the source image metadata (ECR source action).
-              - Effect: Allow
-                Action: [ecr:DescribeImages, ecr:GetAuthorizationToken]
-                Resource: '*'
-              # Pull taskdef.json + appspec.yaml from the app repo (CodeStar source action).
-              - Effect: Allow
-                Action: [codestar-connections:UseConnection, codeconnections:UseConnection]
-                Resource: !Ref GitHubConnectionArn
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - !GetAtt DeploySourceBucket.Arn
+              - !Sub "${DeploySourceBucket.Arn}/*"
+            Condition:
+              Bool: { "aws:SecureTransport": "false" }
 
   # ---- CodeDeploy ----
   CodeDeployApp:
@@ -133,7 +120,7 @@ Resources:
     Properties:
       ApplicationName: !Ref CodeDeployApp
       DeploymentGroupName: !Sub "${ProjectName}-dg"
-      ServiceRoleArn: !GetAtt CodeDeployRole.Arn
+      ServiceRoleArn: !Ref CodeDeployRoleArn
       DeploymentStyle:
         DeploymentType: BLUE_GREEN
         DeploymentOption: WITH_TRAFFIC_CONTROL
@@ -155,26 +142,7 @@ Resources:
             ProdTrafficRoute: { ListenerArns: [!Ref HttpListenerArn] }
       DeploymentConfigName: CodeDeployDefault.ECSAllAtOnce
 
-  # ---- EventBridge ----
-  EventBridgePipelineRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Sub "${ProjectName}-eventbridge-pipeline-role"
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal: { Service: events.amazonaws.com }
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: StartPipeline
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action: codepipeline:StartPipelineExecution
-                Resource: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${ProjectName}-pipeline"
-
+  # ---- EventBridge: ECR push starts the pipeline ----
   EcrImagePushRule:
     Type: AWS::Events::Rule
     Properties:
@@ -200,21 +168,22 @@ Resources:
       Targets:
         - Id: TriggerPipeline
           Arn: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${ProjectName}-pipeline"
-          RoleArn: !GetAtt EventBridgePipelineRole.Arn
+          RoleArn: !Ref EventBridgeRoleArn
 
   # ---- CodePipeline ----
-  # Flow: app pushes image -> EventBridge fires on ECR push -> this pipeline runs.
+  # Flow: app workflow pushes image + (on change) the deploy bundle to S3 ->
+  #       EventBridge fires on the ECR push -> this pipeline runs.
   #   Source : two actions in parallel —
-  #     EcrSource : `latest` image metadata from ECR (imageDetail.json).
-  #     AppSource : taskdef.json + appspec.yaml pulled from the app repo via the
-  #                 CodeStar connection (DetectChanges off — only the ECR push
-  #                 triggers a run, so a deploy always grabs the current files).
+  #     EcrSource    : `latest` image metadata from ECR (imageDetail.json).
+  #     DeploySource : deploy-bundle.zip (taskdef.json + appspec.yaml) from S3.
+  #                    PollForSourceChanges off — the ECR push is the only
+  #                    trigger, and each run reads the current bundle version.
   #   Deploy : CodeDeploy blue/green swap on the ECS service.
   Pipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:
       Name: !Sub "${ProjectName}-pipeline"
-      RoleArn: !GetAtt CodePipelineRole.Arn
+      RoleArn: !Ref CodePipelineRoleArn
       ArtifactStore: { Type: S3, Location: !Ref ArtifactBucket }
       Stages:
         - Name: Source
@@ -226,14 +195,12 @@ Resources:
                 ImageTag: latest
               OutputArtifacts: [{ Name: ImageArtifact }]
               RunOrder: 1
-            - Name: AppSource
-              ActionTypeId: { Category: Source, Owner: AWS, Provider: CodeStarSourceConnection, Version: '1' }
+            - Name: DeploySource
+              ActionTypeId: { Category: Source, Owner: AWS, Provider: S3, Version: '1' }
               Configuration:
-                ConnectionArn: !Ref GitHubConnectionArn
-                FullRepositoryId: !Ref AppRepoFullName
-                BranchName: !Ref AppRepoBranch
-                OutputArtifactFormat: CODE_ZIP
-                DetectChanges: false
+                S3Bucket: !Ref DeploySourceBucket
+                S3ObjectKey: deploy-bundle.zip
+                PollForSourceChanges: 'false'
               OutputArtifacts: [{ Name: SourceArtifact }]
               RunOrder: 1
         - Name: Deploy
@@ -253,7 +220,8 @@ Resources:
               RunOrder: 1
 
 Outputs:
-  PipelineName:      { Value: !Ref Pipeline }
-  ArtifactBucket:    { Value: !Ref ArtifactBucket }
-  ArtifactBucketArn: { Value: !GetAtt ArtifactBucket.Arn }
-  CodeDeployApp:     { Value: !Ref CodeDeployApp }
+  PipelineName:       { Value: !Ref Pipeline }
+  ArtifactBucket:     { Value: !Ref ArtifactBucket }
+  ArtifactBucketArn:  { Value: !GetAtt ArtifactBucket.Arn }
+  DeploySourceBucket: { Value: !Ref DeploySourceBucket }
+  CodeDeployApp:      { Value: !Ref CodeDeployApp }

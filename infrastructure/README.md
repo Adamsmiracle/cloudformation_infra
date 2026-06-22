@@ -1,4 +1,4 @@
-# ecs-ci-cd-lab-infra
+# photo-uploader-lab-infra
 
 Nested-stack CloudFormation deployment for the ECS CI/CD lab. The **parent**
 template is deployed by GitSync; **child** templates live in S3 and are
@@ -19,9 +19,12 @@ infrastructure GitHub repo (this repo)
             └── creates/updates the parent stack
                     │
                     ├── creates NetworkStack    (children/01-network.yaml)
-                    ├── creates EcrStack         (children/02-ecr.yaml)
-                    ├── creates AlbEcsStack      (children/03-alb-ecs.yaml)
-                    └── creates PipelineStack    (children/04-pipeline.yaml)
+                    ├── creates IamStack         (children/02-iam.yaml)
+                    ├── creates StorageStack     (children/03-storage.yaml)
+                    ├── creates DatabaseStack    (children/04-database.yaml)
+                    ├── creates EcrStack         (children/05-ecr.yaml)
+                    ├── creates AlbEcsStack      (children/06-alb-ecs.yaml)
+                    └── creates PipelineStack    (children/07-pipeline.yaml)
 ```
 
 ## Layout
@@ -34,9 +37,12 @@ infrastructure/
 │   ├── parent.yaml             # Parent stack (referenced by GitSync)
 │   └── children/
 │       ├── 01-network.yaml     # VPC, subnets, route tables, VPC endpoints
-│       ├── 02-ecr.yaml         # ECR repo + GitHub Actions OIDC role (app repo)
-│       ├── 03-alb-ecs.yaml     # ALB, target groups, ECS Fargate, autoscaling
-│       └── 04-pipeline.yaml    # EventBridge → CodePipeline → CodeDeploy
+│       ├── 02-iam.yaml         # ALL application IAM roles (consolidated)
+│       ├── 03-storage.yaml     # private S3 image bucket + CloudFront (OAC)
+│       ├── 04-database.yaml    # RDS PostgreSQL (Multi-AZ) + Secrets Manager
+│       ├── 05-ecr.yaml         # ECR repo
+│       ├── 06-alb-ecs.yaml     # ALB, target groups, ECS Fargate, autoscaling (+ SGs, RDS ingress)
+│       └── 07-pipeline.yaml    # EventBridge → CodePipeline → CodeDeploy
 └── .github/workflows/
     └── sync-templates.yml      # Uploads children to S3 + bumps parent version
 ```
@@ -49,7 +55,7 @@ manually:
 
 ```bash
 aws cloudformation deploy \
-  --stack-name ecs-ci-cd-bootstrap \
+  --stack-name photo-uploader-bootstrap \
   --template-file 00-bootstrap.yaml \
   --parameter-overrides GitHubOrg=adamsMiracle InfraRepoName=infra-repo \
   --capabilities CAPABILITY_NAMED_IAM \
@@ -71,7 +77,7 @@ Grab the outputs:
    - CloudFormation console → Stacks → Create stack → Sync from Git
    - Repo: this repo, branch `main`, deployment file `deployment.yaml`
    - Sync role + CFN service role
-4. **GitSync deploys the parent stack**, which creates the four nested
+4. **GitSync deploys the parent stack**, which creates the seven nested
    children by pulling their templates from S3.
 5. **Subsequent updates** to child templates: push to main → GitHub Actions
    re-uploads to S3 + bumps `TemplateVersion` on the parent → CFN re-evaluates
@@ -104,7 +110,7 @@ These must already exist:
 | Resource | How to create |
 |---|---|
 | GitHub OIDC provider in IAM (`token.actions.githubusercontent.com`) | IAM console (already in your account) |
-| CodeConnections connection to GitHub | Developer Tools → Connections |
+| CodeConnections connection to GitHub (**for GitSync only** — the pipeline no longer uses one; it reads the deploy bundle from S3) | Developer Tools → Connections |
 | GitSync role | IAM console |
 | CFN service role (for GitSync to deploy stacks) | IAM console — needs `AdministratorAccess` or scoped equivalent |
 

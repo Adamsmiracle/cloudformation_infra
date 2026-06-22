@@ -1,0 +1,121 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Child stack — private S3 image bucket + CloudFront (Origin Access Control)
+  for the photo gallery. The bucket blocks all public access; only this
+  CloudFront distribution may read it (enforced by the bucket policy's
+  AWS:SourceArn condition). The app uploads images to the bucket; browsers
+  fetch them only through CloudFront.
+
+Parameters:
+  ProjectName:     { Type: String }
+  TemplateVersion: { Type: String }
+
+Resources:
+  # ---- Private image bucket ----
+  ImageBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "${ProjectName}-images-${AWS::AccountId}-${AWS::Region}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules: [{ ObjectOwnership: BucketOwnerEnforced }]   # ACLs disabled — policy-only access
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+            BucketKeyEnabled: true
+      VersioningConfiguration: { Status: Enabled }
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireOldVersions
+            Status: Enabled
+            NoncurrentVersionExpirationInDays: 30
+            AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 }
+
+  # ---- Origin Access Control (modern replacement for OAI) ----
+  OriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${ProjectName}-images-oac"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # ---- CloudFront distribution (Price Class 200) ----
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub "${ProjectName} photo gallery images"
+        PriceClass: PriceClass_200
+        HttpVersion: http2and3
+        IPV6Enabled: true
+        Origins:
+          - Id: s3-images
+            DomainName: !GetAtt ImageBucket.RegionalDomainName
+            OriginAccessControlId: !Ref OriginAccessControl
+            S3OriginConfig:
+              OriginAccessIdentity: ""   # must be empty when using OAC
+        DefaultCacheBehavior:
+          TargetOriginId: s3-images
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          # Managed "CachingOptimized" policy (recommended over legacy ForwardedValues).
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+
+  # ---- Bucket policy: allow ONLY this distribution to read ----
+  ImageBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ImageBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontServicePrincipalReadOnly
+            Effect: Allow
+            Principal: { Service: cloudfront.amazonaws.com }
+            Action: s3:GetObject
+            Resource: !Sub "${ImageBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}"
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - !GetAtt ImageBucket.Arn
+              - !Sub "${ImageBucket.Arn}/*"
+            Condition:
+              Bool: { "aws:SecureTransport": "false" }
+
+  # ---- App-config plane: publish non-deterministic values to SSM so the
+  #      app (and the static taskdef) can read them by stable name. ----
+  ImageBucketParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${ProjectName}/image-bucket"
+      Type: String
+      Value: !Ref ImageBucket
+
+  CloudFrontDomainParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${ProjectName}/cloudfront-domain"
+      Type: String
+      Value: !GetAtt Distribution.DomainName
+
+Outputs:
+  ImageBucketName:          { Value: !Ref ImageBucket }
+  ImageBucketArn:           { Value: !GetAtt ImageBucket.Arn }
+  CloudFrontDomainName:     { Value: !GetAtt Distribution.DomainName }
+  CloudFrontDistributionId: { Value: !Ref Distribution }

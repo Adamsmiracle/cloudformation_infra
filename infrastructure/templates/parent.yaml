@@ -1,15 +1,24 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
-  Parent stack for the ECS CI/CD Lab. Deployed by CloudFormation GitSync.
-  Instantiates 4 nested stacks whose templates live in S3 (uploaded by
-  GitHub Actions in this repo). Parent passes parameters down; children
-  return outputs that other children consume via !GetAtt …Outputs.X.
+  Parent stack for the ECS photo-gallery lab. Deployed by CloudFormation GitSync.
+  Instantiates 7 nested stacks whose templates live in S3 (uploaded by GitHub
+  Actions in this repo). Parent passes parameters down; children return outputs
+  that other children consume via !GetAtt …Outputs.X.
+
+  Layers (industry-standard, by lifecycle):
+    01 network  → VPC, subnets, NAT, endpoints
+    02 iam      → all application IAM roles
+    03 storage  → private S3 image bucket + CloudFront (OAC)
+    04 database → RDS PostgreSQL (Multi-AZ) + Secrets Manager
+    05 ecr      → image registry
+    06 alb-ecs  → ALB + ECS Fargate + autoscaling (+ security groups, RDS ingress)
+    07 pipeline → CodePipeline + CodeDeploy + EventBridge
 
 Parameters:
   # Filled in by deployment.yaml (GitSync deployment file).
   ProjectName:
     Type: String
-    Default: ecs-ci-cd
+    Default: photo-uploader
   TemplatesBaseUrl:
     Type: String
     Description: HTTPS prefix for child templates, e.g. https://s3.eu-central-1.amazonaws.com/<bucket>
@@ -21,14 +30,15 @@ Parameters:
   PrivateSubnet1Cidr:       { Type: String, Default: 10.20.10.0/24 }
   PrivateSubnet2Cidr:       { Type: String, Default: 10.20.11.0/24 }
 
-  # ---- GitHub / OIDC (for the APP-repo workflow) ----
+  # ---- GitHub / OIDC (for the APP-repo workflow's ECR-push + deploy-bundle role) ----
   GitHubOrg:                { Type: String, Default: Adamsmiracle }
   AppRepoName:              { Type: String, Default: aws_lab_applications }
-  # CodeStar (GitHub) connection the pipeline uses to read taskdef.json +
-  # appspec.yaml from the app repo. Create it once in the console and authorize
-  # it, then pass its ARN here (Developer Tools > Settings > Connections).
-  GitHubConnectionArn:      { Type: String }
-  AppRepoBranch:            { Type: String, Default: ecs-ci-cd }
+
+  # ---- Database ----
+  DBInstanceClass:          { Type: String, Default: db.t3.micro }
+  DBName:                   { Type: String, Default: photogallery }
+  DBUsername:               { Type: String, Default: gallery_admin }
+  DBMultiAZ:                { Type: String, AllowedValues: ['true', 'false'], Default: 'true' }
 
   # ---- ECS sizing ----
   ContainerPort:            { Type: Number, Default: 8080 }
@@ -75,29 +85,81 @@ Resources:
         - { Key: Layer,   Value: network }
 
   # -------------------------------------------------------------------------
-  # Child 2 — ECR + GitHub OIDC role (for the APP repo, not this one)
+  # Child 2 — IAM (all application IAM roles)
+  # -------------------------------------------------------------------------
+  IamStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "${TemplatesBaseUrl}/children/02-iam.yaml"
+      TimeoutInMinutes: 10
+      Parameters:
+        ProjectName:         !Ref ProjectName
+        GitHubOrg:           !Ref GitHubOrg
+        AppRepoName:         !Ref AppRepoName
+        TemplateVersion:     !Ref TemplateVersion
+      Tags:
+        - { Key: Project, Value: !Ref ProjectName }
+        - { Key: Layer,   Value: iam }
+
+  # -------------------------------------------------------------------------
+  # Child 3 — Storage (private S3 image bucket + CloudFront OAC)
+  # -------------------------------------------------------------------------
+  StorageStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "${TemplatesBaseUrl}/children/03-storage.yaml"
+      TimeoutInMinutes: 30
+      Parameters:
+        ProjectName:     !Ref ProjectName
+        TemplateVersion: !Ref TemplateVersion
+      Tags:
+        - { Key: Project, Value: !Ref ProjectName }
+        - { Key: Layer,   Value: storage }
+
+  # -------------------------------------------------------------------------
+  # Child 4 — Database (RDS PostgreSQL Multi-AZ + Secrets Manager)
+  # -------------------------------------------------------------------------
+  DatabaseStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "${TemplatesBaseUrl}/children/04-database.yaml"
+      TimeoutInMinutes: 40
+      Parameters:
+        ProjectName:     !Ref ProjectName
+        VpcId:           !GetAtt NetworkStack.Outputs.VpcId
+        PrivateSubnet1:  !GetAtt NetworkStack.Outputs.PrivateSubnet1
+        PrivateSubnet2:  !GetAtt NetworkStack.Outputs.PrivateSubnet2
+        DBInstanceClass: !Ref DBInstanceClass
+        DBName:          !Ref DBName
+        DBUsername:      !Ref DBUsername
+        MultiAZ:         !Ref DBMultiAZ
+        TemplateVersion: !Ref TemplateVersion
+      Tags:
+        - { Key: Project, Value: !Ref ProjectName }
+        - { Key: Layer,   Value: database }
+
+  # -------------------------------------------------------------------------
+  # Child 5 — ECR registry
   # -------------------------------------------------------------------------
   EcrStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: !Sub "${TemplatesBaseUrl}/children/02-ecr.yaml"
+      TemplateURL: !Sub "${TemplatesBaseUrl}/children/05-ecr.yaml"
       TimeoutInMinutes: 10
       Parameters:
         ProjectName:     !Ref ProjectName
-        GitHubOrg:       !Ref GitHubOrg
-        AppRepoName:     !Ref AppRepoName
         TemplateVersion: !Ref TemplateVersion
       Tags:
         - { Key: Project, Value: !Ref ProjectName }
         - { Key: Layer,   Value: registry }
 
   # -------------------------------------------------------------------------
-  # Child 3 — ALB + ECS Fargate + autoscaling
+  # Child 6 — ALB + ECS Fargate + autoscaling
   # -------------------------------------------------------------------------
   AlbEcsStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: !Sub "${TemplatesBaseUrl}/children/03-alb-ecs.yaml"
+      TemplateURL: !Sub "${TemplatesBaseUrl}/children/06-alb-ecs.yaml"
       TimeoutInMinutes: 20
       Parameters:
         ProjectName:          !Ref ProjectName
@@ -115,20 +177,21 @@ Resources:
         MaxCapacity:          !Ref MaxCapacity
         CpuTargetUtilization: !Ref CpuTargetUtilization
         InitialImage:         !Ref InitialImage
+        TaskExecutionRoleArn: !GetAtt IamStack.Outputs.TaskExecutionRoleArn
+        TaskRoleArn:          !GetAtt IamStack.Outputs.TaskRoleArn
+        DbSecurityGroupId:    !GetAtt DatabaseStack.Outputs.DbSecurityGroupId
         TemplateVersion:      !Ref TemplateVersion
       Tags:
         - { Key: Project, Value: !Ref ProjectName }
         - { Key: Layer,   Value: compute }
 
-
-
   # -------------------------------------------------------------------------
-  # Child 4 — CI/CD pipeline (ECR push → EventBridge → CodePipeline → CodeDeploy)
+  # Child 7 — CI/CD pipeline (ECR push → EventBridge → CodePipeline → CodeDeploy)
   # -------------------------------------------------------------------------
   PipelineStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: !Sub "${TemplatesBaseUrl}/children/04-pipeline.yaml"
+      TemplateURL: !Sub "${TemplatesBaseUrl}/children/07-pipeline.yaml"
       TimeoutInMinutes: 15
       Parameters:
         ProjectName:          !Ref ProjectName
@@ -138,9 +201,9 @@ Resources:
         TargetGroupGreenName: !GetAtt AlbEcsStack.Outputs.TargetGroupGreenName
         HttpListenerArn:      !GetAtt AlbEcsStack.Outputs.HttpListenerArn
         EcrRepositoryName:    !GetAtt EcrStack.Outputs.EcrRepositoryName
-        GitHubConnectionArn:  !Ref GitHubConnectionArn
-        AppRepoFullName:      !Sub "${GitHubOrg}/${AppRepoName}"
-        AppRepoBranch:        !Ref AppRepoBranch
+        CodeDeployRoleArn:    !GetAtt IamStack.Outputs.CodeDeployRoleArn
+        CodePipelineRoleArn:  !GetAtt IamStack.Outputs.CodePipelineRoleArn
+        EventBridgeRoleArn:   !GetAtt IamStack.Outputs.EventBridgePipelineRoleArn
         TemplateVersion:      !Ref TemplateVersion
       Tags:
         - { Key: Project, Value: !Ref ProjectName }
@@ -148,15 +211,23 @@ Resources:
 
 Outputs:
   AlbDns:
-    Description: Public URL of the application
+    Description: Public URL of the application (gallery UI + upload)
     Value: !Sub "http://${AlbEcsStack.Outputs.AlbDnsName}"
+  CloudFrontDomainName:
+    Description: CloudFront domain that serves images from the private S3 bucket
+    Value: !GetAtt StorageStack.Outputs.CloudFrontDomainName
+  ImageBucketName:
+    Value: !GetAtt StorageStack.Outputs.ImageBucketName
+  DbEndpoint:
+    Description: RDS PostgreSQL endpoint (private)
+    Value: !GetAtt DatabaseStack.Outputs.DbEndpointAddress
   EcrRepositoryUri:
     Value: !GetAtt EcrStack.Outputs.EcrRepositoryUri
   GitHubActionsRoleArn:
-    Description: For the APP repo workflow
-    Value: !GetAtt EcrStack.Outputs.GitHubActionsRoleArn
+    Description: For the APP repo workflow (ECR push + deploy bundle)
+    Value: !GetAtt IamStack.Outputs.GitHubActionsEcrPushRoleArn
+  DeploySourceBucket:
+    Description: Where the app workflow uploads deploy-bundle.zip (taskdef.json + appspec.yaml)
+    Value: !GetAtt PipelineStack.Outputs.DeploySourceBucket
   PipelineName:
     Value: !GetAtt PipelineStack.Outputs.PipelineName
-  ArtifactBucket:
-    Description: CodePipeline artifact store (managed by the pipeline; nothing to upload manually)
-    Value: !GetAtt PipelineStack.Outputs.ArtifactBucket

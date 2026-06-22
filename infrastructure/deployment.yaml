@@ -1,16 +1,12 @@
 template-file-path: infrastructure/templates/parent.yaml
 parameters:
-  ProjectName: ecs-ci-cd
+  ProjectName: photo-uploader
   # ---- Filled in from bootstrap stack outputs ----
-  TemplatesBaseUrl: https://s3.eu-central-1.amazonaws.com/ecs-ci-cd-cfn-templates-825765391206-eu-central-1
-  # ---- App repo identity for the OIDC role created in child 02-ecr ----
+  TemplatesBaseUrl: https://s3.eu-central-1.amazonaws.com/photo-uploader-cfn-templates-825765391206-eu-central-1
+  # ---- App repo identity for the GitHub Actions OIDC role (child 02-iam) ----
   GitHubOrg: Adamsmiracle
   AppRepoName: aws_lab_applications
-  # ---- CodeStar connection the pipeline uses to read taskdef.json + appspec.yaml
-  # from the app repo. Create + authorize it once in the console, then paste the ARN. ----
-  GitHubConnectionArn: arn:aws:codeconnections:eu-central-1:825765391206:connection/2f041339-b5b6-4ef0-a9fc-746481ad4e6f
-  AppRepoBranch: ecs-ci-cd
   # ---- Initial value; GitHub Actions bumps it on each upload ----
   TemplateVersion: sha-ba7e935
 tags:
-  Project: ecs-ci-cd
+  Project: photo-uploader

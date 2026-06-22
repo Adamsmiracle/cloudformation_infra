@@ -8,7 +8,7 @@ Description: >
 Parameters:
   ProjectName:
     Type: String
-    Default: ecs-ci-cd
+    Default: photo-uploader
   GitHubOrg:
     Type: String
     Description: username that owns the infrastructure repo

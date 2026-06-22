@@ -1,0 +1,221 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Child stack — all application IAM roles for the ECS CI/CD lab, consolidated
+  in one place (dedicated IAM layer). Created early so the compute and pipeline
+  stacks can consume the role ARNs as parameters.
+
+  NOTE: the infra-repo GitHub Actions role lives in 00-bootstrap.yaml instead —
+  it has a different lifecycle (must exist before this parent stack / GitSync).
+  Security groups stay co-located with the workload they protect; resource-based
+  policies (S3 bucket policies) stay with their buckets.
+
+  Every policy here scopes by deterministic, name-derived ARNs (built from
+  ProjectName) rather than cross-stack !GetAtt, so this stack has no dependency
+  on the registry/compute/pipeline stacks and can be created before them.
+
+Parameters:
+  ProjectName:         { Type: String }
+  GitHubOrg:           { Type: String }
+  AppRepoName:         { Type: String }
+  TemplateVersion:     { Type: String }
+
+Resources:
+  # ---------------------------------------------------------------------------
+  # CI: GitHub Actions (app repo) — OIDC role. The app workflow builds + pushes
+  # the image to ECR and publishes the deploy bundle (taskdef.json + appspec.yaml)
+  # to the deploy-source S3 bucket. EventBridge triggers the pipeline on the ECR
+  # push, so this role needs ECR push + deploy-bundle S3 write, nothing else.
+  # ---------------------------------------------------------------------------
+  GitHubActionsEcrPushRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: github-actions-ecr-push-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub "arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com"
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubOrg}/${AppRepoName}:*"
+      Policies:
+        - PolicyName: EcrPushPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:CompleteLayerUpload
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                Resource: !Sub "arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${ProjectName}-app"
+              # Publish the deploy bundle to S3. GetObject is needed for the
+              # workflow's head-object change-detection check before re-upload.
+              - Effect: Allow
+                Action: [s3:PutObject, s3:GetObject]
+                Resource: !Sub "arn:aws:s3:::${ProjectName}-deploy-source-${AWS::AccountId}-${AWS::Region}/*"
+
+  # ---------------------------------------------------------------------------
+  # ECS task roles
+  # ---------------------------------------------------------------------------
+  # Pulls the image + writes logs (used by the ECS agent, not the app).
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-task-exec-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{ Effect: Allow, Principal: { Service: ecs-tasks.amazonaws.com }, Action: sts:AssumeRole }]
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  # Assumed by the running container. Grants ECS Exec + the photo-gallery
+  # app's data access (image bucket, SSM config, DB credentials secret).
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-task-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{ Effect: Allow, Principal: { Service: ecs-tasks.amazonaws.com }, Action: sts:AssumeRole }]
+      Policies:
+        - PolicyName: ExecuteCommand
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Resource: '*'
+        - PolicyName: PhotoGalleryAppAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Read/write image objects in the gallery bucket (upload + serve).
+              - Effect: Allow
+                Action: [s3:PutObject, s3:GetObject, s3:DeleteObject]
+                Resource: !Sub "arn:aws:s3:::${ProjectName}-images-${AWS::AccountId}-${AWS::Region}/*"
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub "arn:aws:s3:::${ProjectName}-images-${AWS::AccountId}-${AWS::Region}"
+              # Read app config (bucket, CloudFront domain, DB endpoint/name/secret ARN).
+              - Effect: Allow
+                Action: [ssm:GetParameter, ssm:GetParameters, ssm:GetParametersByPath]
+                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${ProjectName}/*"
+              # Read the RDS-managed master credentials. The managed secret's name
+              # is "rds!db-<random>", so scope to that prefix in this acct/region.
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:rds!db-*"
+
+  # ---------------------------------------------------------------------------
+  # CD: CodeDeploy (ECS blue/green)
+  # ---------------------------------------------------------------------------
+  CodeDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-codedeploy-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{ Effect: Allow, Principal: { Service: codedeploy.amazonaws.com }, Action: sts:AssumeRole }]
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSCodeDeployRoleForECS
+
+  # ---------------------------------------------------------------------------
+  # CD: CodePipeline. All resource ARNs are derived from ProjectName so this
+  # role has no dependency on the compute/pipeline stacks.
+  # ---------------------------------------------------------------------------
+  CodePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-codepipeline-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{ Effect: Allow, Principal: { Service: codepipeline.amazonaws.com }, Action: sts:AssumeRole }]
+      Policies:
+        - PolicyName: CodePipelineInline
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [s3:GetObject, s3:GetObjectVersion, s3:PutObject, s3:GetBucketLocation, s3:ListBucket, s3:GetBucketVersioning]
+                Resource:
+                  - !Sub "arn:aws:s3:::${ProjectName}-pipeline-artifacts-${AWS::AccountId}-${AWS::Region}"
+                  - !Sub "arn:aws:s3:::${ProjectName}-pipeline-artifacts-${AWS::AccountId}-${AWS::Region}/*"
+              - Effect: Allow
+                Action:
+                  - codedeploy:CreateDeployment
+                  - codedeploy:GetDeployment
+                  - codedeploy:GetDeploymentGroup
+                  - codedeploy:GetApplicationRevision
+                  - codedeploy:RegisterApplicationRevision
+                Resource:
+                  - !Sub "arn:aws:codedeploy:${AWS::Region}:${AWS::AccountId}:application:${ProjectName}-cd-app"
+                  - !Sub "arn:aws:codedeploy:${AWS::Region}:${AWS::AccountId}:deploymentgroup:${ProjectName}-cd-app/${ProjectName}-dg"
+              - Effect: Allow
+                Action: [codedeploy:GetApplication, codedeploy:GetDeploymentConfig]
+                Resource: '*'
+              - Effect: Allow
+                Action: [ecs:DescribeServices, ecs:UpdateService]
+                Resource: !Sub "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:service/${ProjectName}-cluster/${ProjectName}-service"
+              - Effect: Allow
+                Action: [ecs:DescribeTaskDefinition, ecs:RegisterTaskDefinition, ecs:DescribeTasks, ecs:ListTasks]
+                Resource: '*'
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-*"
+                Condition:
+                  StringEqualsIfExists: { iam:PassedToService: ecs-tasks.amazonaws.com }
+              # Read the source image metadata (ECR source action).
+              - Effect: Allow
+                Action: [ecr:DescribeImages, ecr:GetAuthorizationToken]
+                Resource: '*'
+              # Read the deploy bundle (taskdef.json + appspec.yaml) from S3 (S3 source action).
+              - Effect: Allow
+                Action: [s3:GetObject, s3:GetObjectVersion]
+                Resource: !Sub "arn:aws:s3:::${ProjectName}-deploy-source-${AWS::AccountId}-${AWS::Region}/*"
+              - Effect: Allow
+                Action: [s3:GetBucketVersioning, s3:ListBucket]
+                Resource: !Sub "arn:aws:s3:::${ProjectName}-deploy-source-${AWS::AccountId}-${AWS::Region}"
+
+  # ---------------------------------------------------------------------------
+  # EventBridge: lets the ECR-push rule start the pipeline.
+  # ---------------------------------------------------------------------------
+  EventBridgePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-eventbridge-pipeline-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: events.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StartPipeline
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: codepipeline:StartPipelineExecution
+                Resource: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${ProjectName}-pipeline"
+
+Outputs:
+  GitHubActionsEcrPushRoleArn: { Value: !GetAtt GitHubActionsEcrPushRole.Arn }
+  TaskExecutionRoleArn:        { Value: !GetAtt TaskExecutionRole.Arn }
+  TaskRoleArn:                 { Value: !GetAtt TaskRole.Arn }
+  CodeDeployRoleArn:           { Value: !GetAtt CodeDeployRole.Arn }
+  CodePipelineRoleArn:         { Value: !GetAtt CodePipelineRole.Arn }
+  EventBridgePipelineRoleArn:  { Value: !GetAtt EventBridgePipelineRole.Arn }
