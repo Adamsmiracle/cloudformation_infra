@@ -6,6 +6,9 @@ parameters:
   # ---- App repo identity for the GitHub Actions OIDC role (child 02-iam) ----
   GitHubOrg: Adamsmiracle
   AppRepoName: aws_lab_applications
+  # ---- ECS task sizing (Fargate valid combo: 1 vCPU requires >= 2GB) ----
+  ContainerCpu: 1024
+  ContainerMemory: 2048
   # ---- Initial value; GitHub Actions bumps it on each upload ----
   TemplateVersion: sha-d8187c8
 tags:
