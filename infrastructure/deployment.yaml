@@ -6,6 +6,11 @@ parameters:
   # ---- App repo identity for the GitHub Actions OIDC role (child 02-iam) ----
   GitHubOrg: Adamsmiracle
   AppRepoName: aws_lab_applications
+  # ---- Run 2 warm tasks so blue/green deploys never drop to zero healthy tasks.
+  # Set via autoscaling MinCapacity (App Auto Scaling ScalableTarget), NOT the
+  # service's DesiredCount — so this never triggers an ECS Service update on the
+  # CODE_DEPLOY controller. App Auto Scaling enforces the floor and scales to 2.
+  MinCapacity: 2
   # NOTE: ECS task CPU/memory is NOT set here. The service uses the CODE_DEPLOY
   # deployment controller, so CloudFormation cannot change the task definition on
   # it — task sizing must come from the app repo's taskdef.json via CodeDeploy.
