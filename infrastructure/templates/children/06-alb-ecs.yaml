@@ -1,11 +1,13 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: Child stack — ALB + ECS Fargate (blue/green ready) + CPU autoscaling
 
-# Task IAM roles live in the IAM stack (02-iam.yaml) and arrive here as ARNs.
 # Security groups stay co-located with the workload they protect. This stack
 # also owns the RDS ingress rule (DB SG <- service SG on 5432): it's defined
 # here, not in the database stack, because this stack owns the service SG —
 # which avoids a cross-stack security-group dependency cycle.
+#
+# The task definition is NOT managed here. The app repo pushes taskdef.json
+# inside deploy-bundle.zip to S3; CodeDeploy registers and deploys it.
 
 
 Parameters:
@@ -25,10 +27,6 @@ Parameters:
     Type: String
   ContainerPort:
     Type: Number
-  ContainerCpu:
-    Type: Number
-  ContainerMemory:
-    Type: Number
   DesiredCount:
     Type: Number
   MinCapacity:
@@ -37,11 +35,6 @@ Parameters:
     Type: Number
   CpuTargetUtilization:
     Type: Number
-  # IAM role ARNs from the IAM stack.
-  TaskExecutionRoleArn:
-    Type: String
-  TaskRoleArn:
-    Type: String
   # DB security group from the database stack (we add the ingress rule here).
   DbSecurityGroupId:
     Type: String
@@ -195,43 +188,13 @@ Resources:
         - Name: containerInsights
           Value: enabled
 
-  TaskDefinition:
-    Type: AWS::ECS::TaskDefinition
-    Properties:
-      Family: !Sub "${ProjectName}-task"
-      Cpu: !Ref ContainerCpu
-      Memory: !Ref ContainerMemory
-      NetworkMode: awsvpc
-      RequiresCompatibilities:
-        - FARGATE
-      ExecutionRoleArn: !Ref TaskExecutionRoleArn
-      TaskRoleArn: !Ref TaskRoleArn
-      RuntimePlatform:
-        OperatingSystemFamily: LINUX
-        CpuArchitecture: X86_64
-      ContainerDefinitions:
-        - Name: app
-          # Placeholder only — CodeDeploy owns the running image after first deployment.
-          # CloudFormation cannot update the task definition on a CODE_DEPLOY service.
-          Image: public.ecr.aws/nginx/nginx-unprivileged:stable
-          PortMappings:
-            - ContainerPort: !Ref ContainerPort
-              Protocol: tcp
-          Essential: true
-          LogConfiguration:
-            LogDriver: awslogs
-            Options:
-              awslogs-group: !Ref LogGroup
-              awslogs-region: !Ref AWS::Region
-              awslogs-stream-prefix: app
-
   Service:
     Type: AWS::ECS::Service
     DependsOn: HttpListener
     Properties:
       ServiceName: !Sub "${ProjectName}-service"
       Cluster: !Ref Cluster
-      TaskDefinition: !Ref TaskDefinition
+      TaskDefinition: !Sub "${ProjectName}-task"
       DesiredCount: !Ref DesiredCount
       LaunchType: FARGATE
       PlatformVersion: LATEST

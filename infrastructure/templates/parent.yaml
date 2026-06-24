@@ -70,12 +70,6 @@ Parameters:
   ContainerPort:
     Type: Number
     Default: 8080
-  ContainerCpu:
-    Type: Number
-    Default: 512
-  ContainerMemory:
-    Type: Number
-    Default: 1024
   DesiredCount:
     Type: Number
     Default: 1
@@ -214,14 +208,10 @@ Resources:
         PrivateSubnet1:       !GetAtt NetworkStack.Outputs.PrivateSubnet1
         PrivateSubnet2:       !GetAtt NetworkStack.Outputs.PrivateSubnet2
         ContainerPort:        !Ref ContainerPort
-        ContainerCpu:         !Ref ContainerCpu
-        ContainerMemory:      !Ref ContainerMemory
         DesiredCount:         !Ref DesiredCount
         MinCapacity:          !Ref MinCapacity
         MaxCapacity:          !Ref MaxCapacity
         CpuTargetUtilization: !Ref CpuTargetUtilization
-        TaskExecutionRoleArn: !GetAtt IamStack.Outputs.TaskExecutionRoleArn
-        TaskRoleArn:          !GetAtt IamStack.Outputs.TaskRoleArn
         DbSecurityGroupId:    !GetAtt DatabaseStack.Outputs.DbSecurityGroupId
         TemplateVersion:      !Ref TemplateVersion
       Tags:
