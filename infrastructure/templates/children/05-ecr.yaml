@@ -5,8 +5,10 @@ Description: Child stack — ECR repository for the app image
 # IAM stack (02-iam.yaml).
 
 Parameters:
-  ProjectName:     { Type: String }
-  TemplateVersion: { Type: String }
+  ProjectName:
+    Type: String
+  TemplateVersion:
+    Type: String
 
 
 Resources:
@@ -16,14 +18,11 @@ Resources:
     UpdateReplacePolicy: Retain
     Properties:
       RepositoryName: !Sub "${ProjectName}-app"
-      # MUTABLE so the app workflow can overwrite the `latest` tag on every build;
-      # the CodePipeline ECR source action tracks `latest`. Note: no immutable
-      # per-build (<sha>) tag is pushed, so there is no tag-level rollback
-      # reference — CodeDeploy pins the resolved image digest in the task
-      # definition at deploy time instead.
       ImageTagMutability: MUTABLE
-      ImageScanningConfiguration: { ScanOnPush: true }
-      EncryptionConfiguration: { EncryptionType: AES256 }
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      EncryptionConfiguration:
+        EncryptionType: AES256
       LifecyclePolicy:
         LifecyclePolicyText: |
           {
@@ -42,6 +41,9 @@ Resources:
           }
 
 Outputs:
-  EcrRepositoryName: { Value: !Ref EcrRepository }
-  EcrRepositoryArn:  { Value: !GetAtt EcrRepository.Arn }
-  EcrRepositoryUri:  { Value: !GetAtt EcrRepository.RepositoryUri }
+  EcrRepositoryName:
+    Value: !Ref EcrRepository
+  EcrRepositoryArn:
+    Value: !GetAtt EcrRepository.Arn
+  EcrRepositoryUri:
+    Value: !GetAtt EcrRepository.RepositoryUri

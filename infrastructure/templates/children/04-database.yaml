@@ -6,15 +6,31 @@ Description: >
   the app reads the secret + connection details from SSM at startup.
 
 Parameters:
-  ProjectName:     { Type: String }
-  VpcId:           { Type: String }
-  PrivateSubnet1:  { Type: String }
-  PrivateSubnet2:  { Type: String }
-  DBInstanceClass: { Type: String, Default: db.t3.micro }
-  DBName:          { Type: String, Default: photogallery }
-  DBUsername:      { Type: String, Default: gallery_admin }
-  MultiAZ:         { Type: String, AllowedValues: ['true', 'false'], Default: 'true' }
-  TemplateVersion: { Type: String }
+  ProjectName:
+    Type: String
+  VpcId:
+    Type: String
+  PrivateSubnet1:
+    Type: String
+  PrivateSubnet2:
+    Type: String
+  DBInstanceClass:
+    Type: String
+    Default: db.t3.micro
+  DBName:
+    Type: String
+    Default: photogallery
+  DBUsername:
+    Type: String
+    Default: gallery_admin
+  MultiAZ:
+    Type: String
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Default: 'true'
+  TemplateVersion:
+    Type: String
 
 
 Resources:
@@ -23,8 +39,12 @@ Resources:
     Type: AWS::RDS::DBSubnetGroup
     Properties:
       DBSubnetGroupDescription: !Sub "${ProjectName} RDS subnet group (private)"
-      SubnetIds: [!Ref PrivateSubnet1, !Ref PrivateSubnet2]
-      Tags: [{ Key: Name, Value: !Sub "${ProjectName}-db-subnets" }]
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-db-subnets"
 
   # ---- DB security group ----
   # No inline ingress: the rule allowing 5432 from the ECS service SG is created
@@ -40,7 +60,9 @@ Resources:
         - IpProtocol: "-1"
           CidrIp: 127.0.0.1/32
           Description: No egress (RDS does not initiate connections)
-      Tags: [{ Key: Name, Value: !Sub "${ProjectName}-db-sg" }]
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-db-sg"
 
   # ---- PostgreSQL instance ----
   Database:
@@ -64,12 +86,15 @@ Resources:
       # ARN is exposed via !GetAtt Database.MasterUserSecret.SecretArn below.
       ManageMasterUserPassword: true
       DBSubnetGroupName: !Ref DbSubnetGroup
-      VPCSecurityGroups: [!Ref DbSecurityGroup]
+      VPCSecurityGroups:
+        - !Ref DbSecurityGroup
       PubliclyAccessible: false
       BackupRetentionPeriod: 1
       AutoMinorVersionUpgrade: true
       DeletionProtection: false
-      Tags: [{ Key: Name, Value: !Sub "${ProjectName}-db" }]
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-db"
 
   # ---- App-config plane (SSM) ----
   DbEndpointParam:
@@ -94,8 +119,13 @@ Resources:
       Value: !GetAtt Database.MasterUserSecret.SecretArn
 
 Outputs:
-  DbEndpointAddress: { Value: !GetAtt Database.Endpoint.Address }
-  DbEndpointPort:    { Value: !GetAtt Database.Endpoint.Port }
-  DbName:            { Value: !Ref DBName }
-  DbSecretArn:       { Value: !GetAtt Database.MasterUserSecret.SecretArn }
-  DbSecurityGroupId: { Value: !Ref DbSecurityGroup }
+  DbEndpointAddress:
+    Value: !GetAtt Database.Endpoint.Address
+  DbEndpointPort:
+    Value: !GetAtt Database.Endpoint.Port
+  DbName:
+    Value: !Ref DBName
+  DbSecretArn:
+    Value: !GetAtt Database.MasterUserSecret.SecretArn
+  DbSecurityGroupId:
+    Value: !Ref DbSecurityGroup

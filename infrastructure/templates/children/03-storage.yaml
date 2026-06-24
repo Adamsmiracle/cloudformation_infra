@@ -7,8 +7,10 @@ Description: >
   fetch them only through CloudFront.
 
 Parameters:
-  ProjectName:     { Type: String }
-  TemplateVersion: { Type: String }
+  ProjectName:
+    Type: String
+  TemplateVersion:
+    Type: String
 
 
 Resources:
@@ -25,18 +27,22 @@ Resources:
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
       OwnershipControls:
-        Rules: [{ ObjectOwnership: BucketOwnerEnforced }]   # ACLs disabled — policy-only access
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced   # ACLs disabled — policy-only access
       BucketEncryption:
         ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
             BucketKeyEnabled: true
-      VersioningConfiguration: { Status: Enabled }
+      VersioningConfiguration:
+        Status: Enabled
       LifecycleConfiguration:
         Rules:
           - Id: ExpireOldVersions
             Status: Enabled
             NoncurrentVersionExpirationInDays: 30
-            AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 }
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
 
   # ---- Origin Access Control (modern replacement for OAI) ----
   OriginAccessControl:
@@ -67,8 +73,12 @@ Resources:
         DefaultCacheBehavior:
           TargetOriginId: s3-images
           ViewerProtocolPolicy: redirect-to-https
-          AllowedMethods: [GET, HEAD]
-          CachedMethods: [GET, HEAD]
+          AllowedMethods:
+            - GET
+            - HEAD
+          CachedMethods:
+            - GET
+            - HEAD
           Compress: true
           # Managed "CachingOptimized" policy (recommended over legacy ForwardedValues).
           CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
@@ -83,7 +93,8 @@ Resources:
         Statement:
           - Sid: AllowCloudFrontServicePrincipalReadOnly
             Effect: Allow
-            Principal: { Service: cloudfront.amazonaws.com }
+            Principal:
+              Service: cloudfront.amazonaws.com
             Action: s3:GetObject
             Resource: !Sub "${ImageBucket.Arn}/*"
             Condition:
@@ -97,7 +108,8 @@ Resources:
               - !GetAtt ImageBucket.Arn
               - !Sub "${ImageBucket.Arn}/*"
             Condition:
-              Bool: { "aws:SecureTransport": "false" }
+              Bool:
+                "aws:SecureTransport": "false"
 
   # ---- App-config plane: publish non-deterministic values to SSM so the
   #      app (and the static taskdef) can read them by stable name. ----
@@ -116,7 +128,11 @@ Resources:
       Value: !GetAtt Distribution.DomainName
 
 Outputs:
-  ImageBucketName:          { Value: !Ref ImageBucket }
-  ImageBucketArn:           { Value: !GetAtt ImageBucket.Arn }
-  CloudFrontDomainName:     { Value: !GetAtt Distribution.DomainName }
-  CloudFrontDistributionId: { Value: !Ref Distribution }
+  ImageBucketName:
+    Value: !Ref ImageBucket
+  ImageBucketArn:
+    Value: !GetAtt ImageBucket.Arn
+  CloudFrontDomainName:
+    Value: !GetAtt Distribution.DomainName
+  CloudFrontDistributionId:
+    Value: !Ref Distribution

@@ -10,18 +10,29 @@ Description: Child stack — S3 → CodePipeline → CodeDeploy (ECS blue/green)
 
 
 Parameters:
-  ProjectName:          { Type: String }
-  ClusterName:          { Type: String }
-  ServiceName:          { Type: String }
-  TargetGroupBlueName:  { Type: String }
-  TargetGroupGreenName: { Type: String }
-  HttpListenerArn:      { Type: String }
-  EcrRepositoryName:    { Type: String }
+  ProjectName:
+    Type: String
+  ClusterName:
+    Type: String
+  ServiceName:
+    Type: String
+  TargetGroupBlueName:
+    Type: String
+  TargetGroupGreenName:
+    Type: String
+  HttpListenerArn:
+    Type: String
+  EcrRepositoryName:
+    Type: String
   # IAM role ARNs from the IAM stack.
-  CodeDeployRoleArn:    { Type: String }
-  CodePipelineRoleArn:  { Type: String }
-  EventBridgeRoleArn:   { Type: String }
-  TemplateVersion:      { Type: String }
+  CodeDeployRoleArn:
+    Type: String
+  CodePipelineRoleArn:
+    Type: String
+  EventBridgeRoleArn:
+    Type: String
+  TemplateVersion:
+    Type: String
 
 Resources:
   # ---- Pipeline artifact store (internal to CodePipeline) ----
@@ -31,7 +42,8 @@ Resources:
     UpdateReplacePolicy: Retain
     Properties:
       BucketName: !Sub "${ProjectName}-pipeline-artifacts-${AWS::AccountId}-${AWS::Region}"
-      VersioningConfiguration: { Status: Enabled }
+      VersioningConfiguration:
+        Status: Enabled
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -39,7 +51,8 @@ Resources:
         RestrictPublicBuckets: true
       BucketEncryption:
         ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
             BucketKeyEnabled: true
       LifecycleConfiguration:
         Rules:
@@ -47,7 +60,8 @@ Resources:
             Status: Enabled
             ExpirationInDays: 30
             NoncurrentVersionExpirationInDays: 7
-            AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 }
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
 
   ArtifactBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -64,7 +78,8 @@ Resources:
               - !GetAtt ArtifactBucket.Arn
               - !Sub "${ArtifactBucket.Arn}/*"
             Condition:
-              Bool: { "aws:SecureTransport": "false" }
+              Bool:
+                "aws:SecureTransport": "false"
 
   # ---- Deploy-source bucket: holds the taskdef.json + appspec.yaml bundle ----
   # The app workflow uploads deploy-bundle.zip here; the S3 source action below
@@ -75,7 +90,8 @@ Resources:
     UpdateReplacePolicy: Retain
     Properties:
       BucketName: !Sub "${ProjectName}-deploy-source-${AWS::AccountId}-${AWS::Region}"
-      VersioningConfiguration: { Status: Enabled }
+      VersioningConfiguration:
+        Status: Enabled
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -83,14 +99,16 @@ Resources:
         RestrictPublicBuckets: true
       BucketEncryption:
         ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
             BucketKeyEnabled: true
       LifecycleConfiguration:
         Rules:
           - Id: ExpireOldBundles
             Status: Enabled
             NoncurrentVersionExpirationInDays: 30
-            AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 }
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
 
   DeploySourceBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -107,7 +125,8 @@ Resources:
               - !GetAtt DeploySourceBucket.Arn
               - !Sub "${DeploySourceBucket.Arn}/*"
             Condition:
-              Bool: { "aws:SecureTransport": "false" }
+              Bool:
+                "aws:SecureTransport": "false"
 
   # ---- CodeDeploy ----
   CodeDeployApp:
@@ -128,19 +147,27 @@ Resources:
       BlueGreenDeploymentConfiguration:
         # CONTINUE_DEPLOYMENT = shift traffic automatically once green is healthy,
         # with no manual "Reroute traffic" approval gate (fully automated CI/CD).
-        DeploymentReadyOption: { ActionOnTimeout: CONTINUE_DEPLOYMENT }
-        TerminateBlueInstancesOnDeploymentSuccess: { Action: TERMINATE, TerminationWaitTimeInMinutes: 5 }
+        DeploymentReadyOption:
+          ActionOnTimeout: CONTINUE_DEPLOYMENT
+        TerminateBlueInstancesOnDeploymentSuccess:
+          Action: TERMINATE
+          TerminationWaitTimeInMinutes: 5
       AutoRollbackConfiguration:
         Enabled: true
-        Events: [DEPLOYMENT_FAILURE, DEPLOYMENT_STOP_ON_ALARM]
+        Events:
+          - DEPLOYMENT_FAILURE
+          - DEPLOYMENT_STOP_ON_ALARM
       ECSServices:
-        - { ClusterName: !Ref ClusterName, ServiceName: !Ref ServiceName }
+        - ClusterName: !Ref ClusterName
+          ServiceName: !Ref ServiceName
       LoadBalancerInfo:
         TargetGroupPairInfoList:
           - TargetGroups:
-              - { Name: !Ref TargetGroupBlueName }
-              - { Name: !Ref TargetGroupGreenName }
-            ProdTrafficRoute: { ListenerArns: [!Ref HttpListenerArn] }
+              - Name: !Ref TargetGroupBlueName
+              - Name: !Ref TargetGroupGreenName
+            ProdTrafficRoute:
+              ListenerArns:
+                - !Ref HttpListenerArn
       DeploymentConfigName: CodeDeployDefault.ECSAllAtOnce
 
   # ---- EventBridge: ECR push starts the pipeline ----
@@ -185,29 +212,45 @@ Resources:
     Properties:
       Name: !Sub "${ProjectName}-pipeline"
       RoleArn: !Ref CodePipelineRoleArn
-      ArtifactStore: { Type: S3, Location: !Ref ArtifactBucket }
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactBucket
       Stages:
         - Name: Source
           Actions:
             - Name: EcrSource
-              ActionTypeId: { Category: Source, Owner: AWS, Provider: ECR, Version: '1' }
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: ECR
+                Version: '1'
               Configuration:
                 RepositoryName: !Ref EcrRepositoryName
                 ImageTag: latest
-              OutputArtifacts: [{ Name: ImageArtifact }]
+              OutputArtifacts:
+                - Name: ImageArtifact
               RunOrder: 1
             - Name: DeploySource
-              ActionTypeId: { Category: Source, Owner: AWS, Provider: S3, Version: '1' }
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: S3
+                Version: '1'
               Configuration:
                 S3Bucket: !Ref DeploySourceBucket
                 S3ObjectKey: deploy-bundle.zip
                 PollForSourceChanges: 'false'
-              OutputArtifacts: [{ Name: SourceArtifact }]
+              OutputArtifacts:
+                - Name: SourceArtifact
               RunOrder: 1
         - Name: Deploy
           Actions:
             - Name: BlueGreenDeploy
-              ActionTypeId: { Category: Deploy, Owner: AWS, Provider: CodeDeployToECS, Version: '1' }
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CodeDeployToECS
+                Version: '1'
               Configuration:
                 ApplicationName: !Ref CodeDeployApp
                 DeploymentGroupName: !Ref CodeDeployDeploymentGroup
@@ -217,12 +260,19 @@ Resources:
                 AppSpecTemplatePath: appspec.yaml
                 Image1ArtifactName: ImageArtifact
                 Image1ContainerName: IMAGE1_NAME
-              InputArtifacts: [{ Name: ImageArtifact }, { Name: SourceArtifact }]
+              InputArtifacts:
+                - Name: ImageArtifact
+                - Name: SourceArtifact
               RunOrder: 1
 
 Outputs:
-  PipelineName:       { Value: !Ref Pipeline }
-  ArtifactBucket:     { Value: !Ref ArtifactBucket }
-  ArtifactBucketArn:  { Value: !GetAtt ArtifactBucket.Arn }
-  DeploySourceBucket: { Value: !Ref DeploySourceBucket }
-  CodeDeployApp:      { Value: !Ref CodeDeployApp }
+  PipelineName:
+    Value: !Ref Pipeline
+  ArtifactBucket:
+    Value: !Ref ArtifactBucket
+  ArtifactBucketArn:
+    Value: !GetAtt ArtifactBucket.Arn
+  DeploySourceBucket:
+    Value: !Ref DeploySourceBucket
+  CodeDeployApp:
+    Value: !Ref CodeDeployApp

@@ -31,7 +31,8 @@ Resources:
     UpdateReplacePolicy: Retain
     Properties:
       BucketName: !Sub "${ProjectName}-cfn-templates-${AWS::AccountId}-${AWS::Region}"
-      VersioningConfiguration: { Status: Enabled }
+      VersioningConfiguration:
+        Status: Enabled
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -39,14 +40,16 @@ Resources:
         RestrictPublicBuckets: true
       BucketEncryption:
         ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
             BucketKeyEnabled: true
       LifecycleConfiguration:
         Rules:
           - Id: ExpireOldVersions
             Status: Enabled
             NoncurrentVersionExpirationInDays: 30
-            AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 }
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
 
   # Deny non-TLS access
   TemplatesBucketPolicy:
@@ -64,11 +67,13 @@ Resources:
               - !GetAtt TemplatesBucket.Arn
               - !Sub "${TemplatesBucket.Arn}/*"
             Condition:
-              Bool: { "aws:SecureTransport": "false" }
+              Bool:
+                "aws:SecureTransport": "false"
           # Let CloudFormation itself read the templates (needed for nested stacks)
           - Sid: AllowCloudFormationRead
             Effect: Allow
-            Principal: { Service: cloudformation.amazonaws.com }
+            Principal:
+              Service: cloudformation.amazonaws.com
             Action:
               - s3:GetObject
               - s3:GetObjectVersion
@@ -129,7 +134,8 @@ Outputs:
   TemplatesBucketName:
     Description: S3 bucket holding child CloudFormation templates
     Value: !Ref TemplatesBucket
-    Export: { Name: !Sub "${ProjectName}-templates-bucket" }
+    Export:
+      Name: !Sub "${ProjectName}-templates-bucket"
 
   TemplatesBucketUrl:
     Description: Base URL used in nested-stack TemplateURL properties

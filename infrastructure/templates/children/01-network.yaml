@@ -2,12 +2,18 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: Child stack — VPC, subnets, route tables, IGW, VPC endpoints
 
 Parameters:
-  ProjectName:         { Type: String }
-  VpcCidr:             { Type: String }
-  PublicSubnet1Cidr:   { Type: String }
-  PublicSubnet2Cidr:   { Type: String }
-  PrivateSubnet1Cidr:  { Type: String }
-  PrivateSubnet2Cidr:  { Type: String }
+  ProjectName:
+    Type: String
+  VpcCidr:
+    Type: String
+  PublicSubnet1Cidr:
+    Type: String
+  PublicSubnet2Cidr:
+    Type: String
+  PrivateSubnet1Cidr:
+    Type: String
+  PrivateSubnet2Cidr:
+    Type: String
   TemplateVersion:
     Type: String
     Description: upadated in deployment.yaml to force nested stack refresh
@@ -21,13 +27,15 @@ Resources:
       EnableDnsHostnames: true
       EnableDnsSupport: true
       Tags:
-        - { Key: Name, Value: !Sub "${ProjectName}-vpc" }
+        - Key: Name
+          Value: !Sub "${ProjectName}-vpc"
 
   InternetGateway:
     Type: AWS::EC2::InternetGateway
     Properties:
       Tags:
-        - { Key: Name, Value: !Sub "${ProjectName}-igw" }
+        - Key: Name
+          Value: !Sub "${ProjectName}-igw"
 
 
   AttachGateway:
@@ -41,40 +49,66 @@ Resources:
     Properties:
       VpcId: !Ref Vpc
       CidrBlock: !Ref PublicSubnet1Cidr
-      AvailabilityZone: !Select [0, !GetAZs '']
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs ''
       MapPublicIpOnLaunch: false
-      Tags: [{ Key: Name, Value: !Sub "${ProjectName}-public-1" }, { Key: Tier, Value: public }]
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-public-1"
+        - Key: Tier
+          Value: public
 
   PublicSubnet2:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref Vpc
       CidrBlock: !Ref PublicSubnet2Cidr
-      AvailabilityZone: !Select [1, !GetAZs '']
+      AvailabilityZone: !Select
+        - 1
+        - !GetAZs ''
       MapPublicIpOnLaunch: false
-      Tags: [{ Key: Name, Value: !Sub "${ProjectName}-public-2" }, { Key: Tier, Value: public }]
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-public-2"
+        - Key: Tier
+          Value: public
 
   PrivateSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref Vpc
       CidrBlock: !Ref PrivateSubnet1Cidr
-      AvailabilityZone: !Select [0, !GetAZs '']
-      Tags: [{ Key: Name, Value: !Sub "${ProjectName}-private-1" }, { Key: Tier, Value: private }]
+      AvailabilityZone: !Select
+        - 0
+        - !GetAZs ''
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-private-1"
+        - Key: Tier
+          Value: private
 
   PrivateSubnet2:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref Vpc
       CidrBlock: !Ref PrivateSubnet2Cidr
-      AvailabilityZone: !Select [1, !GetAZs '']
-      Tags: [{ Key: Name, Value: !Sub "${ProjectName}-private-2" }, { Key: Tier, Value: private }]
+      AvailabilityZone: !Select
+        - 1
+        - !GetAZs ''
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-private-2"
+        - Key: Tier
+          Value: private
 
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref Vpc
-      Tags: [{ Key: Name, Value: !Sub "${ProjectName}-public-rt" }]
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-public-rt"
 
   PublicDefaultRoute:
     Type: AWS::EC2::Route
@@ -86,39 +120,33 @@ Resources:
 
   PublicSubnet1Assoc:
     Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties: { RouteTableId: !Ref PublicRouteTable, SubnetId: !Ref PublicSubnet1 }
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet1
   PublicSubnet2Assoc:
     Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties: { RouteTableId: !Ref PublicRouteTable, SubnetId: !Ref PublicSubnet2 }
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet2
 
   PrivateRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref Vpc
-      Tags: [{ Key: Name, Value: !Sub "${ProjectName}-private-rt" }]
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-private-rt"
 
   PrivateSubnet1Assoc:
     Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties: { RouteTableId: !Ref PrivateRouteTable, SubnetId: !Ref PrivateSubnet1 }
-  PrivateSubnet2Assoc:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties: { RouteTableId: !Ref PrivateRouteTable, SubnetId: !Ref PrivateSubnet2 }
-
-  NatGateway:
-    Type: AWS::EC2::NatGateway
-    DependsOn: AttachGateway   # regional NAT auto-creates its route to the IGW; ensure it's attached first
-    Properties:
-      ConnectivityType: public
-      AvailabilityMode: regional
-      VpcId: !Ref Vpc
-      Tags: [{ Key: Name, Value: !Sub "${ProjectName}-nat" }]
-
-  PrivateDefaultRoute:
-    Type: AWS::EC2::Route
     Properties:
       RouteTableId: !Ref PrivateRouteTable
-      DestinationCidrBlock: 0.0.0.0/0
-      NatGatewayId: !Ref NatGateway
+      SubnetId: !Ref PrivateSubnet1
+  PrivateSubnet2Assoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref PrivateSubnet2
 
   EndpointSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -130,14 +158,16 @@ Resources:
           FromPort: 443
           ToPort: 443
           CidrIp: !Ref VpcCidr
-          Description: HTTPS from VPC 
+          Description: HTTPS from VPC
       SecurityGroupEgress:
         - IpProtocol: tcp
           FromPort: 443
           ToPort: 443
           CidrIp: !Ref VpcCidr
-          Description: HTTPS to interface endpoints }
-      Tags: [{ Key: Name, Value: !Sub "${ProjectName}-endpoint-sg" }]
+          Description: HTTPS to interface endpoints
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-endpoint-sg"
 
   EcrApiEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -146,8 +176,11 @@ Resources:
       ServiceName: !Sub "com.amazonaws.${AWS::Region}.ecr.api"
       VpcEndpointType: Interface
       PrivateDnsEnabled: true
-      SubnetIds: [!Ref PrivateSubnet1, !Ref PrivateSubnet2]
-      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref EndpointSecurityGroup
 
   EcrDkrEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -156,8 +189,11 @@ Resources:
       ServiceName: !Sub "com.amazonaws.${AWS::Region}.ecr.dkr"
       VpcEndpointType: Interface
       PrivateDnsEnabled: true
-      SubnetIds: [!Ref PrivateSubnet1, !Ref PrivateSubnet2]
-      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref EndpointSecurityGroup
 
   LogsEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -166,8 +202,11 @@ Resources:
       ServiceName: !Sub "com.amazonaws.${AWS::Region}.logs"
       VpcEndpointType: Interface
       PrivateDnsEnabled: true
-      SubnetIds: [!Ref PrivateSubnet1, !Ref PrivateSubnet2]
-      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref EndpointSecurityGroup
 
   SecretsManagerEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -176,8 +215,11 @@ Resources:
       ServiceName: !Sub "com.amazonaws.${AWS::Region}.secretsmanager"
       VpcEndpointType: Interface
       PrivateDnsEnabled: true
-      SubnetIds: [!Ref PrivateSubnet1, !Ref PrivateSubnet2]
-      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref EndpointSecurityGroup
 
   S3GatewayEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -185,7 +227,8 @@ Resources:
       VpcId: !Ref Vpc
       ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
       VpcEndpointType: Gateway
-      RouteTableIds: [!Ref PrivateRouteTable]
+      RouteTableIds:
+        - !Ref PrivateRouteTable
 
   SsmMessagesEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -194,13 +237,22 @@ Resources:
       ServiceName: !Sub "com.amazonaws.${AWS::Region}.ssmmessages"
       VpcEndpointType: Interface
       PrivateDnsEnabled: true
-      SubnetIds: [!Ref PrivateSubnet1, !Ref PrivateSubnet2]
-      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      SecurityGroupIds:
+        - !Ref EndpointSecurityGroup
 
 Outputs:
-  VpcId:           { Value: !Ref Vpc }
-  VpcCidr:         { Value: !Ref VpcCidr }
-  PublicSubnet1:   { Value: !Ref PublicSubnet1 }
-  PublicSubnet2:   { Value: !Ref PublicSubnet2 }
-  PrivateSubnet1:  { Value: !Ref PrivateSubnet1 }
-  PrivateSubnet2:  { Value: !Ref PrivateSubnet2 }
+  VpcId:
+    Value: !Ref Vpc
+  VpcCidr:
+    Value: !Ref VpcCidr
+  PublicSubnet1:
+    Value: !Ref PublicSubnet1
+  PublicSubnet2:
+    Value: !Ref PublicSubnet2
+  PrivateSubnet1:
+    Value: !Ref PrivateSubnet1
+  PrivateSubnet2:
+    Value: !Ref PrivateSubnet2

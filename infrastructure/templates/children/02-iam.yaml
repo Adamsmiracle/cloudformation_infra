@@ -15,10 +15,14 @@ Description: >
 
 
 Parameters:
-  ProjectName:         { Type: String }
-  GitHubOrg:           { Type: String }
-  AppRepoName:         { Type: String }
-  TemplateVersion:     { Type: String }
+  ProjectName:
+    Type: String
+  GitHubOrg:
+    Type: String
+  AppRepoName:
+    Type: String
+  TemplateVersion:
+    Type: String
 
 Resources:
   # ---------------------------------------------------------------------------
@@ -62,7 +66,9 @@ Resources:
               # Publish the deploy bundle to S3. GetObject is needed for the
               # workflow's head-object change-detection check before re-upload.
               - Effect: Allow
-                Action: [s3:PutObject, s3:GetObject]
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
                 Resource: !Sub "arn:aws:s3:::${ProjectName}-deploy-source-${AWS::AccountId}-${AWS::Region}/*"
 
   # ---------------------------------------------------------------------------
@@ -75,7 +81,11 @@ Resources:
       RoleName: !Sub "${ProjectName}-task-exec-role"
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
-        Statement: [{ Effect: Allow, Principal: { Service: ecs-tasks.amazonaws.com }, Action: sts:AssumeRole }]
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
 
@@ -87,7 +97,11 @@ Resources:
       RoleName: !Sub "${ProjectName}-task-role"
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
-        Statement: [{ Effect: Allow, Principal: { Service: ecs-tasks.amazonaws.com }, Action: sts:AssumeRole }]
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
       Policies:
         - PolicyName: ExecuteCommand
           PolicyDocument:
@@ -106,14 +120,20 @@ Resources:
             Statement:
               # Read/write image objects in the gallery bucket (upload + serve).
               - Effect: Allow
-                Action: [s3:PutObject, s3:GetObject, s3:DeleteObject]
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:DeleteObject
                 Resource: !Sub "arn:aws:s3:::${ProjectName}-images-${AWS::AccountId}-${AWS::Region}/*"
               - Effect: Allow
                 Action: s3:ListBucket
                 Resource: !Sub "arn:aws:s3:::${ProjectName}-images-${AWS::AccountId}-${AWS::Region}"
               # Read app config (bucket, CloudFront domain, DB endpoint/name/secret ARN).
               - Effect: Allow
-                Action: [ssm:GetParameter, ssm:GetParameters, ssm:GetParametersByPath]
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:GetParametersByPath
                 Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${ProjectName}/*"
               # Read the RDS-managed master credentials. The managed secret's name
               # is "rds!db-<random>", so scope to that prefix in this acct/region.
@@ -130,7 +150,11 @@ Resources:
       RoleName: !Sub "${ProjectName}-codedeploy-role"
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
-        Statement: [{ Effect: Allow, Principal: { Service: codedeploy.amazonaws.com }, Action: sts:AssumeRole }]
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codedeploy.amazonaws.com
+            Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AWSCodeDeployRoleForECS
 
@@ -144,14 +168,24 @@ Resources:
       RoleName: !Sub "${ProjectName}-codepipeline-role"
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
-        Statement: [{ Effect: Allow, Principal: { Service: codepipeline.amazonaws.com }, Action: sts:AssumeRole }]
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
       Policies:
         - PolicyName: CodePipelineInline
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
-                Action: [s3:GetObject, s3:GetObjectVersion, s3:PutObject, s3:GetBucketLocation, s3:ListBucket, s3:GetBucketVersioning]
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                  - s3:GetBucketLocation
+                  - s3:ListBucket
+                  - s3:GetBucketVersioning
                 Resource:
                   - !Sub "arn:aws:s3:::${ProjectName}-pipeline-artifacts-${AWS::AccountId}-${AWS::Region}"
                   - !Sub "arn:aws:s3:::${ProjectName}-pipeline-artifacts-${AWS::AccountId}-${AWS::Region}/*"
@@ -166,29 +200,44 @@ Resources:
                   - !Sub "arn:aws:codedeploy:${AWS::Region}:${AWS::AccountId}:application:${ProjectName}-cd-app"
                   - !Sub "arn:aws:codedeploy:${AWS::Region}:${AWS::AccountId}:deploymentgroup:${ProjectName}-cd-app/${ProjectName}-dg"
               - Effect: Allow
-                Action: [codedeploy:GetApplication, codedeploy:GetDeploymentConfig]
+                Action:
+                  - codedeploy:GetApplication
+                  - codedeploy:GetDeploymentConfig
                 Resource: '*'
               - Effect: Allow
-                Action: [ecs:DescribeServices, ecs:UpdateService]
+                Action:
+                  - ecs:DescribeServices
+                  - ecs:UpdateService
                 Resource: !Sub "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:service/${ProjectName}-cluster/${ProjectName}-service"
               - Effect: Allow
-                Action: [ecs:DescribeTaskDefinition, ecs:RegisterTaskDefinition, ecs:DescribeTasks, ecs:ListTasks]
+                Action:
+                  - ecs:DescribeTaskDefinition
+                  - ecs:RegisterTaskDefinition
+                  - ecs:DescribeTasks
+                  - ecs:ListTasks
                 Resource: '*'
               - Effect: Allow
                 Action: iam:PassRole
                 Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/${ProjectName}-*"
                 Condition:
-                  StringEqualsIfExists: { iam:PassedToService: ecs-tasks.amazonaws.com }
+                  StringEqualsIfExists:
+                    iam:PassedToService: ecs-tasks.amazonaws.com
               # Read the source image metadata (ECR source action).
               - Effect: Allow
-                Action: [ecr:DescribeImages, ecr:GetAuthorizationToken]
+                Action:
+                  - ecr:DescribeImages
+                  - ecr:GetAuthorizationToken
                 Resource: '*'
               # Read the deploy bundle (taskdef.json + appspec.yaml) from S3 (S3 source action).
               - Effect: Allow
-                Action: [s3:GetObject, s3:GetObjectVersion]
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
                 Resource: !Sub "arn:aws:s3:::${ProjectName}-deploy-source-${AWS::AccountId}-${AWS::Region}/*"
               - Effect: Allow
-                Action: [s3:GetBucketVersioning, s3:ListBucket]
+                Action:
+                  - s3:GetBucketVersioning
+                  - s3:ListBucket
                 Resource: !Sub "arn:aws:s3:::${ProjectName}-deploy-source-${AWS::AccountId}-${AWS::Region}"
 
   # ---------------------------------------------------------------------------
@@ -202,7 +251,8 @@ Resources:
         Version: '2012-10-17'
         Statement:
           - Effect: Allow
-            Principal: { Service: events.amazonaws.com }
+            Principal:
+              Service: events.amazonaws.com
             Action: sts:AssumeRole
       Policies:
         - PolicyName: StartPipeline
@@ -214,9 +264,15 @@ Resources:
                 Resource: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${ProjectName}-pipeline"
 
 Outputs:
-  GitHubActionsEcrPushRoleArn: { Value: !GetAtt GitHubActionsEcrPushRole.Arn }
-  TaskExecutionRoleArn:        { Value: !GetAtt TaskExecutionRole.Arn }
-  TaskRoleArn:                 { Value: !GetAtt TaskRole.Arn }
-  CodeDeployRoleArn:           { Value: !GetAtt CodeDeployRole.Arn }
-  CodePipelineRoleArn:         { Value: !GetAtt CodePipelineRole.Arn }
-  EventBridgePipelineRoleArn:  { Value: !GetAtt EventBridgePipelineRole.Arn }
+  GitHubActionsEcrPushRoleArn:
+    Value: !GetAtt GitHubActionsEcrPushRole.Arn
+  TaskExecutionRoleArn:
+    Value: !GetAtt TaskExecutionRole.Arn
+  TaskRoleArn:
+    Value: !GetAtt TaskRole.Arn
+  CodeDeployRoleArn:
+    Value: !GetAtt CodeDeployRole.Arn
+  CodePipelineRoleArn:
+    Value: !GetAtt CodePipelineRole.Arn
+  EventBridgePipelineRoleArn:
+    Value: !GetAtt EventBridgePipelineRole.Arn
