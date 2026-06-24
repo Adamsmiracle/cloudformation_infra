@@ -194,7 +194,6 @@ Resources:
     Properties:
       ServiceName: !Sub "${ProjectName}-service"
       Cluster: !Ref Cluster
-      TaskDefinition: !Sub "${ProjectName}-task"
       DesiredCount: !Ref DesiredCount
       LaunchType: FARGATE
       PlatformVersion: LATEST
