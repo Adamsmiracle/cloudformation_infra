@@ -15,6 +15,6 @@ parameters:
   # deployment controller, so CloudFormation cannot change the task definition on
   # it — task sizing must come from the app repo's taskdef.json via CodeDeploy.
   # ---- Initial value; GitHub Actions bumps it on each upload ----
-  TemplateVersion: sha-74d8ec9
+  TemplateVersion: sha-e0a0cb6
 tags:
   Project: photo-uploader
