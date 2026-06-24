@@ -75,7 +75,12 @@ Resources:
           FromPort: 443
           ToPort: 443
           CidrIp: !Ref VpcCidr
-          Description: HTTPS to VPC endpoints
+          Description: HTTPS to interface VPC endpoints
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS to S3 gateway endpoint (public IPs, private subnet has no IGW route)
         - IpProtocol: tcp
           FromPort: 5432
           ToPort: 5432
