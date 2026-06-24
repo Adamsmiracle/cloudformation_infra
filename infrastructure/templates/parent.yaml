@@ -220,7 +220,6 @@ Resources:
         MinCapacity:          !Ref MinCapacity
         MaxCapacity:          !Ref MaxCapacity
         CpuTargetUtilization: !Ref CpuTargetUtilization
-        EcrRepositoryUri:     !GetAtt EcrStack.Outputs.EcrRepositoryUri
         TaskExecutionRoleArn: !GetAtt IamStack.Outputs.TaskExecutionRoleArn
         TaskRoleArn:          !GetAtt IamStack.Outputs.TaskRoleArn
         DbSecurityGroupId:    !GetAtt DatabaseStack.Outputs.DbSecurityGroupId

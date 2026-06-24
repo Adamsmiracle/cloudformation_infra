@@ -37,8 +37,6 @@ Parameters:
     Type: Number
   CpuTargetUtilization:
     Type: Number
-  EcrRepositoryUri:
-    Type: String
   # IAM role ARNs from the IAM stack.
   TaskExecutionRoleArn:
     Type: String
@@ -213,7 +211,9 @@ Resources:
         CpuArchitecture: X86_64
       ContainerDefinitions:
         - Name: app
-          Image: !Sub "${EcrRepositoryUri}:latest"
+          # Placeholder only — CodeDeploy owns the running image after first deployment.
+          # CloudFormation cannot update the task definition on a CODE_DEPLOY service.
+          Image: public.ecr.aws/nginx/nginx-unprivileged:stable
           PortMappings:
             - ContainerPort: !Ref ContainerPort
               Protocol: tcp
