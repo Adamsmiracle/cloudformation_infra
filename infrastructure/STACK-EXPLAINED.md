@@ -51,7 +51,7 @@ Pure orchestration — no AWS resources of its own. Instantiates all 7 children,
 
 ## 01 — Network (`children/01-network.yaml`)
 
-Standard two-AZ VPC with public/private separation, a regional NAT gateway, and private VPC endpoints so ECS tasks reach AWS APIs without traversing the public internet.
+Standard two-AZ VPC with public/private separation and **no NAT gateway** — private subnets reach AWS services exclusively through VPC endpoints, so no task traffic ever traverses the public internet. Every AWS API the tasks call must therefore have a matching endpoint (the gap that NAT used to hide).
 
 | Resource | Type | What it does |
 |---|---|---|
@@ -66,18 +66,17 @@ Standard two-AZ VPC with public/private separation, a regional NAT gateway, and 
 | `PublicDefaultRoute` | `AWS::EC2::Route` | Routes `0.0.0.0/0` to the internet gateway for public subnets. |
 | `PublicSubnet1Assoc` | `AWS::EC2::SubnetRouteTableAssociation` | Associates `PublicSubnet1` with the public route table. |
 | `PublicSubnet2Assoc` | `AWS::EC2::SubnetRouteTableAssociation` | Associates `PublicSubnet2` with the public route table. |
-| `PrivateRouteTable` | `AWS::EC2::RouteTable` | Route table shared by both private subnets. |
-| `PrivateDefaultRoute` | `AWS::EC2::Route` | Routes `0.0.0.0/0` to the NAT gateway for private subnets. |
+| `PrivateRouteTable` | `AWS::EC2::RouteTable` | Route table shared by both private subnets. Has **no `0.0.0.0/0` route** — only the local route and the S3 gateway-endpoint prefix-list route. Outbound to AWS services goes solely through the interface/gateway endpoints below. |
 | `PrivateSubnet1Assoc` | `AWS::EC2::SubnetRouteTableAssociation` | Associates `PrivateSubnet1` with the private route table. |
 | `PrivateSubnet2Assoc` | `AWS::EC2::SubnetRouteTableAssociation` | Associates `PrivateSubnet2` with the private route table. |
-| `NatGateway` | `AWS::EC2::NatGateway` | **Regional NAT** (`AvailabilityMode: regional`, `ConnectivityType: public`). Gives private subnets outbound internet without requiring a per-AZ EIP/subnet assignment. |
 | `EndpointSecurityGroup` | `AWS::EC2::SecurityGroup` | Controls traffic to interface VPC endpoints — allows HTTPS (port 443) from within the VPC CIDR only. |
-| `EcrApiEndpoint` | `AWS::EC2::VPCEndpoint` (Interface) | Private connectivity to the ECR control-plane API (`ecr.api`). ECS tasks pull image metadata without touching the public internet. |
-| `EcrDkrEndpoint` | `AWS::EC2::VPCEndpoint` (Interface) | Private connectivity to the ECR Docker registry (`ecr.dkr`). ECS tasks pull image layers without touching the public internet. |
+| `EcrApiEndpoint` | `AWS::EC2::VPCEndpoint` (Interface) | Private connectivity to the ECR control-plane API (`ecr.api`) — image auth/metadata. One of the **three** legs of an image pull. |
+| `EcrDkrEndpoint` | `AWS::EC2::VPCEndpoint` (Interface) | Private connectivity to the ECR Docker registry (`ecr.dkr`) — image manifest. The **actual image layers are fetched from S3**, so the S3 gateway endpoint below is the third leg of every pull. |
 | `LogsEndpoint` | `AWS::EC2::VPCEndpoint` (Interface) | Private connectivity to CloudWatch Logs. Container log shipping stays in-VPC. |
 | `SecretsManagerEndpoint` | `AWS::EC2::VPCEndpoint` (Interface) | Private connectivity to Secrets Manager. Tasks read DB credentials without leaving the VPC. |
-| `SsmMessagesEndpoint` | `AWS::EC2::VPCEndpoint` (Interface) | Private connectivity to SSM Messages. Required for ECS Exec (interactive shell into running tasks). |
-| `S3GatewayEndpoint` | `AWS::EC2::VPCEndpoint` (Gateway) | Free gateway endpoint for S3. Image uploads, artifact reads, and template fetches from private subnets stay off the public internet and off the NAT. |
+| `SsmMessagesEndpoint` | `AWS::EC2::VPCEndpoint` (Interface) | SSM **Messages** — the Session Manager data channel. Required for ECS Exec (interactive shell into running tasks). **Not** the SSM API. |
+| `SsmEndpoint` | `AWS::EC2::VPCEndpoint` (Interface) | SSM **API** (`ssm`) — Parameter Store. The app reads its runtime config via `getParametersByPath` at startup; without this endpoint (and with no NAT) the app hangs on boot. Distinct from `ssmmessages`. |
+| `S3GatewayEndpoint` | `AWS::EC2::VPCEndpoint` (Gateway) | Free gateway endpoint for S3, attached to the private route table. Carries image uploads, CloudFront-origin reads, **and the ECR image-layer downloads**. Note: S3 is reached via public S3 IPs, so the task SG must allow `443` egress to them (see `ServiceSecurityGroup`). |
 
 ---
 
@@ -141,7 +140,7 @@ The compute layer: load balancer, Fargate service configured for blue/green, and
 | Resource | Type | What it does |
 |---|---|---|
 | `AlbSecurityGroup` | `AWS::EC2::SecurityGroup` | ALB security group. Allows inbound HTTP `:80` from `0.0.0.0/0`; egress restricted to the container port within the VPC CIDR (to ECS tasks only). |
-| `ServiceSecurityGroup` | `AWS::EC2::SecurityGroup` | ECS task security group. Egress: HTTPS `:443` outbound to the internet (for VPC endpoints and NAT), and PostgreSQL `:5432` to the DB security group. No inline ingress (added by `ServiceIngressFromAlb`). |
+| `ServiceSecurityGroup` | `AWS::EC2::SecurityGroup` | ECS task security group. Egress: HTTPS `:443` to the VPC CIDR (interface endpoints), HTTPS `:443` to `0.0.0.0/0` (the **S3 gateway endpoint** is reached via public S3 IPs — SGs match the real destination IP, not the route, so this rule is required for ECR layer pulls; safe because the private subnet has no internet route), and PostgreSQL `:5432` to the DB security group. No inline ingress (added by `ServiceIngressFromAlb`). |
 | `ServiceIngressFromAlb` | `AWS::EC2::SecurityGroupIngress` | Adds the rule allowing the ALB security group to reach tasks on the container port. Defined separately to avoid a circular reference between the two security groups. |
 | `DbIngressFromService` | `AWS::EC2::SecurityGroupIngress` | Adds port-5432 ingress to the **DB security group** from the service security group. Defined here (not in the database stack) because this stack owns the service SG — breaks the cross-stack cycle. |
 | `LoadBalancer` | `AWS::ElasticLoadBalancingV2::LoadBalancer` | Internet-facing Application Load Balancer across the two public subnets. Drops invalid header fields, 60-second idle timeout. |
@@ -150,8 +149,7 @@ The compute layer: load balancer, Fargate service configured for blue/green, and
 | `HttpListener` | `AWS::ElasticLoadBalancingV2::Listener` | HTTP `:80` listener on the ALB. Forwards to the blue target group by default; CodeDeploy swaps it to green during deployments. |
 | `LogGroup` | `AWS::Logs::LogGroup` | CloudWatch log group `/ecs/${ProjectName}` for container logs, 14-day retention. |
 | `Cluster` | `AWS::ECS::Cluster` | The Fargate cluster. Container Insights enabled for enhanced CloudWatch metrics. |
-| `TaskDefinition` | `AWS::ECS::TaskDefinition` | Fargate task definition (awsvpc network mode, x86_64 Linux). Uses the bootstrap `InitialImage` (public nginx) at stack-create time; CodeDeploy replaces the image on first deployment. Wires the execution and task roles, and configures the `awslogs` log driver. |
-| `Service` | `AWS::ECS::Service` | The Fargate service. `DeploymentController: CODE_DEPLOY` (CloudFormation hands off deployment control to CodeDeploy). 100/200% min/max healthy percent, ECS Exec enabled, runs in private subnets with no public IP, registered to the blue target group. |
+| `Service` | `AWS::ECS::Service` | The Fargate service. `DeploymentController: CODE_DEPLOY` (CloudFormation hands off deployment control to CodeDeploy). 100/200% min/max healthy percent, ECS Exec enabled, runs in private subnets with no public IP, registered to the blue target group. **No `TaskDefinition` property** — the task definition is not managed here; CodeDeploy registers it from the `taskdef.json` the app repo ships. CloudFormation cannot update a `TaskDefinition` on a CODE_DEPLOY service, so the property is omitted entirely to avoid update failures. |
 | `ScalableTarget` | `AWS::ApplicationAutoScaling::ScalableTarget` | Registers the ECS service for Application Auto Scaling between `MinCapacity` and `MaxCapacity` tasks. `MinCapacity: 2` (set in `deployment.yaml`) ensures there are always 2 warm tasks so blue/green never drops to zero healthy. |
 | `CpuScalingPolicy` | `AWS::ApplicationAutoScaling::ScalingPolicy` | Target-tracking policy on average CPU utilisation (target: `CpuTargetUtilization`, default 60%). 60-second scale-in and scale-out cooldowns. Adds tasks when CPU rises, removes them when it falls back. |
 

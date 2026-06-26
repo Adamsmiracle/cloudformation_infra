@@ -24,7 +24,6 @@ Parameters:
     Type: String
   EcrRepositoryName:
     Type: String
-  # IAM role ARNs from the IAM stack.
   CodeDeployRoleArn:
     Type: String
   CodePipelineRoleArn:
@@ -35,7 +34,6 @@ Parameters:
     Type: String
 
 Resources:
-  # ---- Pipeline artifact store (internal to CodePipeline) ----
   ArtifactBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Delete
@@ -81,9 +79,6 @@ Resources:
               Bool:
                 "aws:SecureTransport": "false"
 
-  # ---- Deploy-source bucket: holds the taskdef.json + appspec.yaml bundle ----
-  # The app workflow uploads deploy-bundle.zip here; the S3 source action below
-  # reads it. Versioning is REQUIRED for a CodePipeline S3 source action.
   DeploySourceBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Delete
@@ -145,8 +140,6 @@ Resources:
         DeploymentType: BLUE_GREEN
         DeploymentOption: WITH_TRAFFIC_CONTROL
       BlueGreenDeploymentConfiguration:
-        # CONTINUE_DEPLOYMENT = shift traffic automatically once green is healthy,
-        # with no manual "Reroute traffic" approval gate (fully automated CI/CD).
         DeploymentReadyOption:
           ActionOnTimeout: CONTINUE_DEPLOYMENT
         TerminateBlueInstancesOnDeploymentSuccess:
@@ -188,8 +181,6 @@ Resources:
             - SUCCESS
           repository-name:
             - !Ref EcrRepositoryName
-          # Scope to the `latest` tag — the only tag the app workflow pushes.
-          # The ECR push event is the single deploy trigger.
           image-tag:
             - latest
       State: ENABLED
@@ -199,14 +190,6 @@ Resources:
           RoleArn: !Ref EventBridgeRoleArn
 
   # ---- CodePipeline ----
-  # Flow: app workflow pushes image + (on change) the deploy bundle to S3 ->
-  #       EventBridge fires on the ECR push -> this pipeline runs.
-  #   Source : two actions in parallel —
-  #     EcrSource    : `latest` image metadata from ECR (imageDetail.json).
-  #     DeploySource : deploy-bundle.zip (taskdef.json + appspec.yaml) from S3.
-  #                    PollForSourceChanges off — the ECR push is the only
-  #                    trigger, and each run reads the current bundle version.
-  #   Deploy : CodeDeploy blue/green swap on the ECS service.
   Pipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:

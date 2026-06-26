@@ -25,12 +25,6 @@ Parameters:
     Type: String
 
 Resources:
-  # ---------------------------------------------------------------------------
-  # CI: GitHub Actions (app repo) — OIDC role. The app workflow builds + pushes
-  # the image to ECR and publishes the deploy bundle (taskdef.json + appspec.yaml)
-  # to the deploy-source S3 bucket. EventBridge triggers the pipeline on the ECR
-  # push, so this role needs ECR push + deploy-bundle S3 write, nothing else.
-  # ---------------------------------------------------------------------------
   GitHubActionsEcrPushRole:
     Type: AWS::IAM::Role
     Properties:
@@ -63,8 +57,6 @@ Resources:
                   - ecr:PutImage
                   - ecr:UploadLayerPart
                 Resource: !Sub "arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${ProjectName}-app"
-              # Publish the deploy bundle to S3. GetObject is needed for the
-              # workflow's head-object change-detection check before re-upload.
               - Effect: Allow
                 Action:
                   - s3:PutObject
@@ -118,7 +110,6 @@ Resources:
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              # Read/write image objects in the gallery bucket (upload + serve).
               - Effect: Allow
                 Action:
                   - s3:PutObject
@@ -128,15 +119,12 @@ Resources:
               - Effect: Allow
                 Action: s3:ListBucket
                 Resource: !Sub "arn:aws:s3:::${ProjectName}-images-${AWS::AccountId}-${AWS::Region}"
-              # Read app config (bucket, CloudFront domain, DB endpoint/name/secret ARN).
               - Effect: Allow
                 Action:
                   - ssm:GetParameter
                   - ssm:GetParameters
                   - ssm:GetParametersByPath
                 Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${ProjectName}/*"
-              # Read the RDS-managed master credentials. The managed secret's name
-              # is "rds!db-<random>", so scope to that prefix in this acct/region.
               - Effect: Allow
                 Action: secretsmanager:GetSecretValue
                 Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:rds!db-*"
@@ -158,10 +146,6 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AWSCodeDeployRoleForECS
 
-  # ---------------------------------------------------------------------------
-  # CD: CodePipeline. All resource ARNs are derived from ProjectName so this
-  # role has no dependency on the compute/pipeline stacks.
-  # ---------------------------------------------------------------------------
   CodePipelineRole:
     Type: AWS::IAM::Role
     Properties:

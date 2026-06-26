@@ -34,7 +34,6 @@ Parameters:
 
 
 Resources:
-  # ---- Subnet group: RDS lives in the two private subnets (Multi-AZ) ----
   DbSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
     Properties:
@@ -46,11 +45,6 @@ Resources:
         - Key: Name
           Value: !Sub "${ProjectName}-db-subnets"
 
-  # ---- DB security group ----
-  # No inline ingress: the rule allowing 5432 from the ECS service SG is created
-  # in the compute stack (which owns the service SG). Putting it here would need
-  # the service SG id from a later stack -> cross-stack cycle. Egress is locked
-  # down (RDS never initiates outbound connections).
   DbSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -67,13 +61,11 @@ Resources:
   # ---- PostgreSQL instance ----
   Database:
     Type: AWS::RDS::DBInstance
-    # Lab: delete cleanly on teardown. For production use Snapshot.
     DeletionPolicy: Delete
     UpdateReplacePolicy: Delete
     Properties:
       DBInstanceIdentifier: !Sub "${ProjectName}-db"
       Engine: postgres
-      # Major version only -> RDS selects the latest supported minor.
       EngineVersion: "16"
       DBInstanceClass: !Ref DBInstanceClass
       AllocatedStorage: "20"
@@ -82,8 +74,6 @@ Resources:
       MultiAZ: !Ref MultiAZ
       DBName: !Ref DBName
       MasterUsername: !Ref DBUsername
-      # Generates + rotates the master password in Secrets Manager. The secret
-      # ARN is exposed via !GetAtt Database.MasterUserSecret.SecretArn below.
       ManageMasterUserPassword: true
       DBSubnetGroupName: !Ref DbSubnetGroup
       VPCSecurityGroups:

@@ -16,7 +16,6 @@ Description: >
 
 
 Parameters:
-  # Filled in by deployment.yaml (GitSync deployment file).
   ProjectName:
     Type: String
     Default: photo-uploader
@@ -82,9 +81,6 @@ Parameters:
   CpuTargetUtilization:
     Type: Number
     Default: 60
-  # ---- Cache-busting (bumped by GitHub Actions on every template upload
-  # so that CFN re-evaluates the nested children even though their S3
-  # URLs are stable) ----
   TemplateVersion:
     Type: String
     Default: initial

@@ -14,7 +14,6 @@ Parameters:
 
 
 Resources:
-  # ---- Private image bucket ----
   ImageBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Delete
@@ -28,7 +27,7 @@ Resources:
         RestrictPublicBuckets: true
       OwnershipControls:
         Rules:
-          - ObjectOwnership: BucketOwnerEnforced   # ACLs disabled — policy-only access
+          - ObjectOwnership: BucketOwnerEnforced
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
@@ -44,7 +43,6 @@ Resources:
             AbortIncompleteMultipartUpload:
               DaysAfterInitiation: 1
 
-  # ---- Origin Access Control (modern replacement for OAI) ----
   OriginAccessControl:
     Type: AWS::CloudFront::OriginAccessControl
     Properties:
@@ -80,7 +78,7 @@ Resources:
             - GET
             - HEAD
           Compress: true
-          # Managed "CachingOptimized" policy (recommended over legacy ForwardedValues).
+          # Managed "CachingOptimized" policy
           CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
 
   # ---- Bucket policy: allow ONLY this distribution to read ----
@@ -111,8 +109,6 @@ Resources:
               Bool:
                 "aws:SecureTransport": "false"
 
-  # ---- App-config plane: publish non-deterministic values to SSM so the
-  #      app (and the static taskdef) can read them by stable name. ----
   ImageBucketParam:
     Type: AWS::SSM::Parameter
     Properties:

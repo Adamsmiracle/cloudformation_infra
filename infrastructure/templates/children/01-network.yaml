@@ -243,10 +243,6 @@ Resources:
       SecurityGroupIds:
         - !Ref EndpointSecurityGroup
 
-  # SSM API (Parameter Store). Distinct from ssmmessages (Session Manager data
-  # channel for ECS Exec). The app reads its runtime config from Parameter Store
-  # at startup via getParametersByPath, so without this endpoint the task hangs
-  # on boot once NAT is removed.
   SsmEndpoint:
     Type: AWS::EC2::VPCEndpoint
     Properties:

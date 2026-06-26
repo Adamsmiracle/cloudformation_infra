@@ -35,7 +35,6 @@ Parameters:
     Type: Number
   CpuTargetUtilization:
     Type: Number
-  # DB security group from the database stack (we add the ingress rule here).
   DbSecurityGroupId:
     Type: String
   TemplateVersion:
@@ -99,8 +98,6 @@ Resources:
       ToPort: !Ref ContainerPort
       SourceSecurityGroupId: !Ref AlbSecurityGroup
 
-  # RDS ingress from the ECS tasks (5432). Defined here because this stack owns
-  # the service SG; the database stack created the DB SG with no inline ingress.
   DbIngressFromService:
     Type: AWS::EC2::SecurityGroupIngress
     Properties:
@@ -152,7 +149,7 @@ Resources:
     Properties:
       Name: !Sub "${ProjectName}-tg-green"
       VpcId: !Ref VpcId
-      Port: 80          # See TargetGroupBlue: kept at 80 to avoid immutable-Port replacement.
+      Port: 80
       Protocol: HTTP
       TargetType: ip
       HealthCheckPath: /
