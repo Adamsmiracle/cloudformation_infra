@@ -22,7 +22,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.INFRA_GHA_ROLE_ARN }}
+          role-to-assume: ${{ secrets.TODO_INFRA_GHA_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Upload changed templates to S3
