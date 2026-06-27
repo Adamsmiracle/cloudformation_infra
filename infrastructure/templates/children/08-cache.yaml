@@ -1,0 +1,89 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Child stack — Amazon ElastiCache (Redis) for the To-Do app read cache.
+  Nodes run in the dedicated cache-tier private subnets and accept traffic
+  only from the ECS service (ingress rule added by the compute stack to avoid
+  a cross-stack security-group cycle). The app reads the endpoint from SSM.
+
+Parameters:
+  ProjectName:
+    Type: String
+  VpcId:
+    Type: String
+  CacheSubnet1:
+    Type: String
+  CacheSubnet2:
+    Type: String
+  CacheNodeType:
+    Type: String
+    Default: cache.t3.micro
+  TemplateVersion:
+    Type: String
+
+
+Resources:
+  CacheSubnetGroup:
+    Type: AWS::ElastiCache::SubnetGroup
+    Properties:
+      CacheSubnetGroupName: !Sub "${ProjectName}-redis-subnets"
+      Description: !Sub "${ProjectName} Redis subnet group (cache tier)"
+      SubnetIds:
+        - !Ref CacheSubnet1
+        - !Ref CacheSubnet2
+
+  CacheSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub "${ProjectName} Redis - ingress from ECS tasks only"
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 127.0.0.1/32
+          Description: No egress (cache does not initiate connections)
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-redis-sg"
+
+  RedisReplicationGroup:
+    Type: AWS::ElastiCache::ReplicationGroup
+    Properties:
+      ReplicationGroupId: !Sub "${ProjectName}-redis"
+      ReplicationGroupDescription: !Sub "${ProjectName} Redis read cache"
+      Engine: redis
+      EngineVersion: "7.1"
+      CacheNodeType: !Ref CacheNodeType
+      NumCacheClusters: 1
+      AutomaticFailoverEnabled: false
+      MultiAZEnabled: false
+      CacheSubnetGroupName: !Ref CacheSubnetGroup
+      SecurityGroupIds:
+        - !Ref CacheSecurityGroup
+      Port: 6379
+      AtRestEncryptionEnabled: true
+      TransitEncryptionEnabled: false
+      AutoMinorVersionUpgrade: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-redis"
+
+  RedisEndpointParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${ProjectName}/redis-endpoint"
+      Type: String
+      Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Address
+
+  RedisPortParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/${ProjectName}/redis-port"
+      Type: String
+      Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Port
+
+Outputs:
+  CacheSecurityGroupId:
+    Value: !Ref CacheSecurityGroup
+  RedisPrimaryEndpoint:
+    Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Address
+  RedisPort:
+    Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Port

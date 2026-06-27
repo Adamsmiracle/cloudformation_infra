@@ -2,9 +2,13 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: Child stack — ALB + ECS Fargate (blue/green ready) + CPU autoscaling
 
 # Security groups stay co-located with the workload they protect. This stack
-# also owns the RDS ingress rule (DB SG <- service SG on 5432): it's defined
-# here, not in the database stack, because this stack owns the service SG —
-# which avoids a cross-stack security-group dependency cycle.
+# owns the ECS service SG, so it also defines the ingress rules on the RDS Proxy
+# SG and the Redis SG (proxy/cache SGs <- service SG). Defining them here avoids
+# a cross-stack security-group dependency cycle (the data/cache stacks would
+# otherwise need the service SG, which is created here).
+#
+# ECS tasks talk to the database ONLY through the RDS Proxy (5432) and to the
+# read cache through Redis (6379) — never to RDS directly.
 #
 # The task definition is NOT managed here. The app repo pushes taskdef.json
 # inside deploy-bundle.zip to S3; CodeDeploy registers and deploys it.
@@ -21,9 +25,9 @@ Parameters:
     Type: String
   PublicSubnet2:
     Type: String
-  PrivateSubnet1:
+  AppSubnet1:
     Type: String
-  PrivateSubnet2:
+  AppSubnet2:
     Type: String
   ContainerPort:
     Type: Number
@@ -35,7 +39,9 @@ Parameters:
     Type: Number
   CpuTargetUtilization:
     Type: Number
-  DbSecurityGroupId:
+  ProxySecurityGroupId:
+    Type: String
+  CacheSecurityGroupId:
     Type: String
   TemplateVersion:
     Type: String
@@ -83,8 +89,13 @@ Resources:
         - IpProtocol: tcp
           FromPort: 5432
           ToPort: 5432
-          DestinationSecurityGroupId: !Ref DbSecurityGroupId
-          Description: PostgreSQL to RDS
+          DestinationSecurityGroupId: !Ref ProxySecurityGroupId
+          Description: PostgreSQL to RDS Proxy
+        - IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          DestinationSecurityGroupId: !Ref CacheSecurityGroupId
+          Description: Redis to ElastiCache
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-svc-sg"
@@ -98,15 +109,25 @@ Resources:
       ToPort: !Ref ContainerPort
       SourceSecurityGroupId: !Ref AlbSecurityGroup
 
-  DbIngressFromService:
+  ProxyIngressFromService:
     Type: AWS::EC2::SecurityGroupIngress
     Properties:
-      GroupId: !Ref DbSecurityGroupId
+      GroupId: !Ref ProxySecurityGroupId
       IpProtocol: tcp
       FromPort: 5432
       ToPort: 5432
       SourceSecurityGroupId: !Ref ServiceSecurityGroup
       Description: PostgreSQL from ECS tasks
+
+  CacheIngressFromService:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref CacheSecurityGroupId
+      IpProtocol: tcp
+      FromPort: 6379
+      ToPort: 6379
+      SourceSecurityGroupId: !Ref ServiceSecurityGroup
+      Description: Redis from ECS tasks
 
   # ---- ALB ----
   LoadBalancer:
@@ -210,8 +231,8 @@ Resources:
         AwsvpcConfiguration:
           AssignPublicIp: DISABLED
           Subnets:
-            - !Ref PrivateSubnet1
-            - !Ref PrivateSubnet2
+            - !Ref AppSubnet1
+            - !Ref AppSubnet2
           SecurityGroups:
             - !Ref ServiceSecurityGroup
       LoadBalancers:

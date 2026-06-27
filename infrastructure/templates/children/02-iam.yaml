@@ -28,7 +28,7 @@ Resources:
   GitHubActionsEcrPushRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: github-actions-ecr-push-role
+      RoleName: !Sub "${ProjectName}-github-actions-ecr-push-role"
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -81,8 +81,9 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
 
-  # Assumed by the running container. Grants ECS Exec + the photo-gallery
-  # app's data access (image bucket, SSM config, DB credentials secret).
+  # Assumed by the running container. Grants ECS Exec + the To-Do app's data
+  # access (SSM config + DB credentials secret). Redis needs no IAM (network
+  # access is controlled by the cache security group).
   TaskRole:
     Type: AWS::IAM::Role
     Properties:
@@ -106,19 +107,10 @@ Resources:
                   - ssmmessages:OpenControlChannel
                   - ssmmessages:OpenDataChannel
                 Resource: '*'
-        - PolicyName: PhotoGalleryAppAccess
+        - PolicyName: TodoAppAccess
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              - Effect: Allow
-                Action:
-                  - s3:PutObject
-                  - s3:GetObject
-                  - s3:DeleteObject
-                Resource: !Sub "arn:aws:s3:::${ProjectName}-images-${AWS::AccountId}-${AWS::Region}/*"
-              - Effect: Allow
-                Action: s3:ListBucket
-                Resource: !Sub "arn:aws:s3:::${ProjectName}-images-${AWS::AccountId}-${AWS::Region}"
               - Effect: Allow
                 Action:
                   - ssm:GetParameter

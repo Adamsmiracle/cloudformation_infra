@@ -1,28 +1,29 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
-  Child stack — RDS PostgreSQL (Multi-AZ) for photo metadata. Runs in the
-  private subnets, reachable only from the ECS tasks. The master credentials
-  are generated and rotated by Secrets Manager (ManageMasterUserPassword);
-  the app reads the secret + connection details from SSM at startup.
+  Child stack — RDS PostgreSQL (Multi-AZ) + RDS Proxy for the To-Do app.
+  Both run in the dedicated data-tier private subnets. The app connects to the
+  RDS Proxy endpoint (connection pooling / failover smoothing), never to the DB
+  directly. Master credentials are generated and rotated by Secrets Manager
+  (ManageMasterUserPassword); the proxy and the app read that secret.
 
 Parameters:
   ProjectName:
     Type: String
   VpcId:
     Type: String
-  PrivateSubnet1:
+  DataSubnet1:
     Type: String
-  PrivateSubnet2:
+  DataSubnet2:
     Type: String
   DBInstanceClass:
     Type: String
     Default: db.t3.micro
   DBName:
     Type: String
-    Default: photogallery
+    Default: todoapp
   DBUsername:
     Type: String
-    Default: gallery_admin
+    Default: todo_admin
   MultiAZ:
     Type: String
     AllowedValues:
@@ -37,18 +38,20 @@ Resources:
   DbSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
     Properties:
-      DBSubnetGroupDescription: !Sub "${ProjectName} RDS subnet group (private)"
+      DBSubnetGroupDescription: !Sub "${ProjectName} RDS subnet group (data tier)"
       SubnetIds:
-        - !Ref PrivateSubnet1
-        - !Ref PrivateSubnet2
+        - !Ref DataSubnet1
+        - !Ref DataSubnet2
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-db-subnets"
 
+  # ---- Security groups ----
+  # DB accepts traffic only from the RDS Proxy (least privilege).
   DbSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: !Sub "${ProjectName} RDS - ingress from ECS tasks only"
+      GroupDescription: !Sub "${ProjectName} RDS - ingress from RDS Proxy only"
       VpcId: !Ref VpcId
       SecurityGroupEgress:
         - IpProtocol: "-1"
@@ -57,6 +60,37 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-db-sg"
+
+  # Proxy accepts traffic from the ECS service (rule added by the compute stack
+  # to avoid a cross-stack SG cycle) and forwards to the DB.
+  ProxySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub "${ProjectName} RDS Proxy - ingress from ECS, egress to RDS"
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-proxy-sg"
+
+  ProxyEgressToDb:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ProxySecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      DestinationSecurityGroupId: !Ref DbSecurityGroup
+      Description: PostgreSQL to RDS
+
+  DbIngressFromProxy:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref DbSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref ProxySecurityGroup
+      Description: PostgreSQL from RDS Proxy
 
   # ---- PostgreSQL instance ----
   Database:
@@ -86,13 +120,76 @@ Resources:
         - Key: Name
           Value: !Sub "${ProjectName}-db"
 
+  # ---- RDS Proxy ----
+  # IAM role the proxy assumes to read the DB master secret from Secrets Manager.
+  ProxyRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-rds-proxy-role"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: rds.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ReadDbSecret
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !GetAtt Database.MasterUserSecret.SecretArn
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
+
+  DbProxy:
+    Type: AWS::RDS::DBProxy
+    Properties:
+      DBProxyName: !Sub "${ProjectName}-proxy"
+      EngineFamily: POSTGRESQL
+      RoleArn: !GetAtt ProxyRole.Arn
+      Auth:
+        - AuthScheme: SECRETS
+          SecretArn: !GetAtt Database.MasterUserSecret.SecretArn
+          IAMAuth: DISABLED
+      VpcSubnetIds:
+        - !Ref DataSubnet1
+        - !Ref DataSubnet2
+      VpcSecurityGroupIds:
+        - !Ref ProxySecurityGroup
+      RequireTLS: false
+      IdleClientTimeout: 1800
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-proxy"
+
+  DbProxyTargetGroup:
+    Type: AWS::RDS::DBProxyTargetGroup
+    Properties:
+      DBProxyName: !Ref DbProxy
+      TargetGroupName: default
+      DBInstanceIdentifiers:
+        - !Ref Database
+      ConnectionPoolConfigurationInfo:
+        MaxConnectionsPercent: 100
+        MaxIdleConnectionsPercent: 50
+        ConnectionBorrowTimeout: 120
+
   # ---- App-config plane (SSM) ----
-  DbEndpointParam:
+  # The app connects through the proxy endpoint, not the raw DB endpoint.
+  DbProxyEndpointParam:
     Type: AWS::SSM::Parameter
     Properties:
       Name: !Sub "/${ProjectName}/db-endpoint"
       Type: String
-      Value: !GetAtt Database.Endpoint.Address
+      Value: !GetAtt DbProxy.Endpoint
 
   DbNameParam:
     Type: AWS::SSM::Parameter
@@ -110,7 +207,11 @@ Resources:
 
 Outputs:
   DbEndpointAddress:
+    Description: Raw RDS endpoint (apps should use the proxy endpoint instead)
     Value: !GetAtt Database.Endpoint.Address
+  DbProxyEndpoint:
+    Description: RDS Proxy endpoint the application connects to
+    Value: !GetAtt DbProxy.Endpoint
   DbEndpointPort:
     Value: !GetAtt Database.Endpoint.Port
   DbName:
@@ -119,3 +220,5 @@ Outputs:
     Value: !GetAtt Database.MasterUserSecret.SecretArn
   DbSecurityGroupId:
     Value: !Ref DbSecurityGroup
+  ProxySecurityGroupId:
+    Value: !Ref ProxySecurityGroup

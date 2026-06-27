@@ -1,24 +1,25 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
-  Parent stack for the ECS photo-gallery lab. Deployed by CloudFormation GitSync.
-  Instantiates 7 nested stacks whose templates live in S3 (uploaded by GitHub
-  Actions in this repo). Parent passes parameters down; children return outputs
-  that other children consume via !GetAtt …Outputs.X.
+  Parent stack for the To-Do app lab (ECS Fargate + RDS via RDS Proxy +
+  ElastiCache Redis). Deployed by CloudFormation GitSync. Instantiates nested
+  stacks whose templates live in S3 (uploaded by GitHub Actions in this repo).
+  Parent passes parameters down; children return outputs that other children
+  consume via !GetAtt …Outputs.X.
 
   Layers (industry-standard, by lifecycle):
-    01 network  → VPC, subnets, NAT, endpoints
+    01 network  → multi-AZ VPC, dedicated subnets per tier, endpoints
     02 iam      → all application IAM roles
-    03 storage  → private S3 image bucket + CloudFront (OAC)
-    04 database → RDS PostgreSQL (Multi-AZ) + Secrets Manager
+    04 database → RDS PostgreSQL (Multi-AZ) + RDS Proxy + Secrets Manager
     05 ecr      → image registry
-    06 alb-ecs  → ALB + ECS Fargate + autoscaling (+ security groups, RDS ingress)
+    06 alb-ecs  → ALB + ECS Fargate + autoscaling (+ security groups)
     07 pipeline → CodePipeline + CodeDeploy + EventBridge
+    08 cache    → ElastiCache Redis read cache
 
 
 Parameters:
   ProjectName:
     Type: String
-    Default: photo-uploader
+    Default: todo-app
   TemplatesBaseUrl:
     Type: String
     Description: HTTPS prefix for child templates, e.g. https://s3.eu-central-1.amazonaws.com/<bucket>
@@ -26,19 +27,31 @@ Parameters:
   # ---- Networking ----
   VpcCidr:
     Type: String
-    Default: 10.20.0.0/16
+    Default: 10.30.0.0/16
   PublicSubnet1Cidr:
     Type: String
-    Default: 10.20.0.0/24
+    Default: 10.30.0.0/24
   PublicSubnet2Cidr:
     Type: String
-    Default: 10.20.1.0/24
-  PrivateSubnet1Cidr:
+    Default: 10.30.1.0/24
+  AppSubnet1Cidr:
     Type: String
-    Default: 10.20.10.0/24
-  PrivateSubnet2Cidr:
+    Default: 10.30.10.0/24
+  AppSubnet2Cidr:
     Type: String
-    Default: 10.20.11.0/24
+    Default: 10.30.11.0/24
+  DataSubnet1Cidr:
+    Type: String
+    Default: 10.30.20.0/24
+  DataSubnet2Cidr:
+    Type: String
+    Default: 10.30.21.0/24
+  CacheSubnet1Cidr:
+    Type: String
+    Default: 10.30.30.0/24
+  CacheSubnet2Cidr:
+    Type: String
+    Default: 10.30.31.0/24
 
   # ---- GitHub / OIDC (for the APP-repo workflow's ECR-push + deploy-bundle role) ----
   GitHubOrg:
@@ -54,16 +67,21 @@ Parameters:
     Default: db.t3.micro
   DBName:
     Type: String
-    Default: photogallery
+    Default: todoapp
   DBUsername:
     Type: String
-    Default: gallery_admin
+    Default: todo_admin
   DBMultiAZ:
     Type: String
     AllowedValues:
       - 'true'
       - 'false'
     Default: 'true'
+
+  # ---- Cache ----
+  CacheNodeType:
+    Type: String
+    Default: cache.t3.micro
 
   # ---- ECS sizing ----
   ContainerPort:
@@ -101,8 +119,12 @@ Resources:
         VpcCidr:            !Ref VpcCidr
         PublicSubnet1Cidr:  !Ref PublicSubnet1Cidr
         PublicSubnet2Cidr:  !Ref PublicSubnet2Cidr
-        PrivateSubnet1Cidr: !Ref PrivateSubnet1Cidr
-        PrivateSubnet2Cidr: !Ref PrivateSubnet2Cidr
+        AppSubnet1Cidr:     !Ref AppSubnet1Cidr
+        AppSubnet2Cidr:     !Ref AppSubnet2Cidr
+        DataSubnet1Cidr:    !Ref DataSubnet1Cidr
+        DataSubnet2Cidr:    !Ref DataSubnet2Cidr
+        CacheSubnet1Cidr:   !Ref CacheSubnet1Cidr
+        CacheSubnet2Cidr:   !Ref CacheSubnet2Cidr
         TemplateVersion:    !Ref TemplateVersion
       Tags:
         - Key: Project
@@ -130,24 +152,7 @@ Resources:
           Value: iam
 
   # -------------------------------------------------------------------------
-  # Child 3 — Storage (private S3 image bucket + CloudFront OAC)
-  # -------------------------------------------------------------------------
-  StorageStack:
-    Type: AWS::CloudFormation::Stack
-    Properties:
-      TemplateURL: !Sub "${TemplatesBaseUrl}/children/03-storage.yaml"
-      TimeoutInMinutes: 30
-      Parameters:
-        ProjectName:     !Ref ProjectName
-        TemplateVersion: !Ref TemplateVersion
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
-        - Key: Layer
-          Value: storage
-
-  # -------------------------------------------------------------------------
-  # Child 4 — Database (RDS PostgreSQL Multi-AZ + Secrets Manager)
+  # Child 4 — Database (RDS PostgreSQL Multi-AZ + RDS Proxy + Secrets Manager)
   # -------------------------------------------------------------------------
   DatabaseStack:
     Type: AWS::CloudFormation::Stack
@@ -157,8 +162,8 @@ Resources:
       Parameters:
         ProjectName:     !Ref ProjectName
         VpcId:           !GetAtt NetworkStack.Outputs.VpcId
-        PrivateSubnet1:  !GetAtt NetworkStack.Outputs.PrivateSubnet1
-        PrivateSubnet2:  !GetAtt NetworkStack.Outputs.PrivateSubnet2
+        DataSubnet1:     !GetAtt NetworkStack.Outputs.DataSubnet1
+        DataSubnet2:     !GetAtt NetworkStack.Outputs.DataSubnet2
         DBInstanceClass: !Ref DBInstanceClass
         DBName:          !Ref DBName
         DBUsername:      !Ref DBUsername
@@ -196,20 +201,21 @@ Resources:
       TemplateURL: !Sub "${TemplatesBaseUrl}/children/06-alb-ecs.yaml"
       TimeoutInMinutes: 20
       Parameters:
-        ProjectName:          !Ref ProjectName
-        VpcId:                !GetAtt NetworkStack.Outputs.VpcId
-        VpcCidr:              !GetAtt NetworkStack.Outputs.VpcCidr
-        PublicSubnet1:        !GetAtt NetworkStack.Outputs.PublicSubnet1
-        PublicSubnet2:        !GetAtt NetworkStack.Outputs.PublicSubnet2
-        PrivateSubnet1:       !GetAtt NetworkStack.Outputs.PrivateSubnet1
-        PrivateSubnet2:       !GetAtt NetworkStack.Outputs.PrivateSubnet2
-        ContainerPort:        !Ref ContainerPort
-        DesiredCount:         !Ref DesiredCount
-        MinCapacity:          !Ref MinCapacity
-        MaxCapacity:          !Ref MaxCapacity
-        CpuTargetUtilization: !Ref CpuTargetUtilization
-        DbSecurityGroupId:    !GetAtt DatabaseStack.Outputs.DbSecurityGroupId
-        TemplateVersion:      !Ref TemplateVersion
+        ProjectName:           !Ref ProjectName
+        VpcId:                 !GetAtt NetworkStack.Outputs.VpcId
+        VpcCidr:               !GetAtt NetworkStack.Outputs.VpcCidr
+        PublicSubnet1:         !GetAtt NetworkStack.Outputs.PublicSubnet1
+        PublicSubnet2:         !GetAtt NetworkStack.Outputs.PublicSubnet2
+        AppSubnet1:            !GetAtt NetworkStack.Outputs.AppSubnet1
+        AppSubnet2:            !GetAtt NetworkStack.Outputs.AppSubnet2
+        ContainerPort:         !Ref ContainerPort
+        DesiredCount:          !Ref DesiredCount
+        MinCapacity:           !Ref MinCapacity
+        MaxCapacity:           !Ref MaxCapacity
+        CpuTargetUtilization:  !Ref CpuTargetUtilization
+        ProxySecurityGroupId:  !GetAtt DatabaseStack.Outputs.ProxySecurityGroupId
+        CacheSecurityGroupId:  !GetAtt CacheStack.Outputs.CacheSecurityGroupId
+        TemplateVersion:       !Ref TemplateVersion
       Tags:
         - Key: Project
           Value: !Ref ProjectName
@@ -242,18 +248,40 @@ Resources:
         - Key: Layer
           Value: cicd
 
+  # -------------------------------------------------------------------------
+  # Child 8 — ElastiCache Redis read cache
+  # -------------------------------------------------------------------------
+  CacheStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "${TemplatesBaseUrl}/children/08-cache.yaml"
+      TimeoutInMinutes: 30
+      Parameters:
+        ProjectName:     !Ref ProjectName
+        VpcId:           !GetAtt NetworkStack.Outputs.VpcId
+        CacheSubnet1:    !GetAtt NetworkStack.Outputs.CacheSubnet1
+        CacheSubnet2:    !GetAtt NetworkStack.Outputs.CacheSubnet2
+        CacheNodeType:   !Ref CacheNodeType
+        TemplateVersion: !Ref TemplateVersion
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Layer
+          Value: cache
+
 Outputs:
   AlbDns:
-    Description: Public URL of the application (gallery UI + upload)
+    Description: Public URL of the To-Do application
     Value: !Sub "http://${AlbEcsStack.Outputs.AlbDnsName}"
-  CloudFrontDomainName:
-    Description: CloudFront domain that serves images from the private S3 bucket
-    Value: !GetAtt StorageStack.Outputs.CloudFrontDomainName
-  ImageBucketName:
-    Value: !GetAtt StorageStack.Outputs.ImageBucketName
+  DbProxyEndpoint:
+    Description: RDS Proxy endpoint the app connects to (private)
+    Value: !GetAtt DatabaseStack.Outputs.DbProxyEndpoint
   DbEndpoint:
-    Description: RDS PostgreSQL endpoint (private)
+    Description: Raw RDS PostgreSQL endpoint (private)
     Value: !GetAtt DatabaseStack.Outputs.DbEndpointAddress
+  RedisEndpoint:
+    Description: ElastiCache Redis primary endpoint (private)
+    Value: !GetAtt CacheStack.Outputs.RedisPrimaryEndpoint
   EcrRepositoryUri:
     Value: !GetAtt EcrStack.Outputs.EcrRepositoryUri
   GitHubActionsRoleArn:

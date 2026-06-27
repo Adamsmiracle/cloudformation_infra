@@ -1,20 +1,22 @@
 template-file-path: infrastructure/templates/parent.yaml
 parameters:
-  ProjectName: photo-uploader
-  # ---- Filled in from bootstrap stack outputs ----
-  TemplatesBaseUrl: https://s3.eu-central-1.amazonaws.com/photo-uploader-cfn-templates-825765391206-eu-central-1
+  ProjectName: todo-app
+  # ---- Filled in from the todo-app bootstrap stack outputs ----
+  TemplatesBaseUrl: https://s3.eu-central-1.amazonaws.com/todo-app-cfn-templates-825765391206-eu-central-1
   # ---- App repo identity for the GitHub Actions OIDC role (child 02-iam) ----
   GitHubOrg: Adamsmiracle
   AppRepoName: aws_lab_applications
-  # ---- Run 2 warm tasks so blue/green deploys never drop to zero healthy tasks.
-  # Set via autoscaling MinCapacity (App Auto Scaling ScalableTarget), NOT the
-  # service's DesiredCount — so this never triggers an ECS Service update on the
-  # CODE_DEPLOY controller. App Auto Scaling enforces the floor and scales to 2.
-  MinCapacity: 2
+  # ---- ECS autoscaling: min 1 / desired 1 / max 4, CPU target tracking.
+  # MinCapacity is enforced by App Auto Scaling (ScalableTarget), not the
+  # service DesiredCount, so it never triggers an ECS update on the CODE_DEPLOY
+  # controller.
+  MinCapacity: 1
+  DesiredCount: 1
+  MaxCapacity: 4
   # NOTE: ECS task CPU/memory is NOT set here. The service uses the CODE_DEPLOY
   # deployment controller, so CloudFormation cannot change the task definition on
   # it — task sizing must come from the app repo's taskdef.json via CodeDeploy.
   # ---- Initial value; GitHub Actions bumps it on each upload ----
-  TemplateVersion: sha-373010a
+  TemplateVersion: initial
 tags:
-  Project: photo-uploader
+  Project: todo-app

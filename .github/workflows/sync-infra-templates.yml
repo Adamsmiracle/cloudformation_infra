@@ -2,7 +2,7 @@ name: Sync Infrastructure Templates
 
 on:
   push:
-    branches: [photo_upload]
+    branches: [todo]
     paths:
       - 'infrastructure/templates/parent.yaml'
       - 'infrastructure/templates/children/**'
@@ -30,8 +30,8 @@ jobs:
           git diff --name-only HEAD~1 HEAD -- infrastructure/templates/ \
           | while read -r file; do
               key="${file#infrastructure/templates/}"
-              echo "Uploading $file → s3://${{ secrets.TEMPLATES_BUCKET }}/$key"
-              aws s3 cp "$file" "s3://${{ secrets.TEMPLATES_BUCKET }}/$key"
+              echo "Uploading $file → s3://${{ secrets.TODO_TEMPLATES_BUCKET }}/$key"
+              aws s3 cp "$file" "s3://${{ secrets.TODO_TEMPLATES_BUCKET }}/$key"
             done
 
       - name: Bump TemplateVersion in deployment.yaml
