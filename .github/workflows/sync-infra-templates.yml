@@ -16,8 +16,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2  # need parent commit to diff against
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -25,14 +23,15 @@ jobs:
           role-to-assume: ${{ secrets.TODO_INFRA_GHA_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Upload changed templates to S3
+      # Mirror the entire templates/ tree to S3 on every push. `sync` uploads
+      # new/changed files and `--delete` removes any object no longer in the
+      # repo, so the bucket always fully reflects the branch — including the
+      # first push after the bucket is (re)created for a review teardown.
+      - name: Sync all templates to S3
         run: |
-          git diff --name-only HEAD~1 HEAD -- infrastructure/templates/ \
-          | while read -r file; do
-              key="${file#infrastructure/templates/}"
-              echo "Uploading $file → s3://${{ secrets.TODO_TEMPLATES_BUCKET }}/$key"
-              aws s3 cp "$file" "s3://${{ secrets.TODO_TEMPLATES_BUCKET }}/$key"
-            done
+          aws s3 sync infrastructure/templates/ \
+            "s3://${{ secrets.TODO_TEMPLATES_BUCKET }}/" \
+            --delete
 
       - name: Bump TemplateVersion in deployment.yaml
         run: |
