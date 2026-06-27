@@ -92,6 +92,7 @@ Resources:
       SourceSecurityGroupId: !Ref ProxySecurityGroup
       Description: PostgreSQL from RDS Proxy
 
+
   # ---- PostgreSQL instance ----
   Database:
     Type: AWS::RDS::DBInstance
