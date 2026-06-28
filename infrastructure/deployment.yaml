@@ -6,12 +6,15 @@ parameters:
   # ---- App repo identity for the GitHub Actions OIDC role (child 02-iam) ----
   GitHubOrg: Adamsmiracle
   AppRepoName: aws_lab_applications
-  # ---- ECS autoscaling: min 1 / desired 1 / max 4, CPU target tracking.
-  # MinCapacity is enforced by App Auto Scaling (ScalableTarget), not the
-  # service DesiredCount, so it never triggers an ECS update on the CODE_DEPLOY
-  # controller.
+  # ---- ECS autoscaling: min 1 / max 4, CPU target tracking.
+  # The service is created with DesiredCount 0 so the stack completes before any
+  # app image exists in ECR (the tasks pull from the private ECR repo via VPC
+  # endpoints). App Auto Scaling (MinCapacity 1) then enforces a running floor of
+  # 1 once the image is pushed — and since MinCapacity is enforced by the
+  # ScalableTarget, not DesiredCount, it never triggers an ECS update on the
+  # CODE_DEPLOY controller.
   MinCapacity: 1
-  DesiredCount: 1
+  DesiredCount: 0
   MaxCapacity: 4
   # NOTE: ECS task CPU/memory is NOT set here. The service uses the CODE_DEPLOY
   # deployment controller, so CloudFormation cannot change the task definition on

@@ -43,9 +43,6 @@ Parameters:
     Type: Number
   ContainerMemory:
     Type: Number
-  InitialImage:
-    Type: String
-    Description: Placeholder image used only to create the service; CodeDeploy replaces it on first deploy
   TaskExecutionRoleArn:
     Type: String
   TaskRoleArn:
@@ -224,9 +221,11 @@ Resources:
 
   # Initial task definition needed to CREATE the service. With the CODE_DEPLOY
   # controller, CloudFormation requires one at creation but ignores later changes
-  # to it — CodeDeploy registers and deploys real revisions (from the app repo's
-  # taskdef.json) thereafter. The placeholder image serves HTTP 200 on the
-  # container port so the service can stabilize before the first real deploy.
+  # to it — CodeDeploy registers/deploys real revisions (from the app repo's
+  # taskdef.json) thereafter. The image points at the PRIVATE ECR repo, which is
+  # pullable through the VPC endpoints (no NAT). The service is created with
+  # DesiredCount 0 so the stack completes without a running task; App Auto
+  # Scaling (min 1) brings a task up once the app image is pushed to ECR.
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
@@ -242,7 +241,7 @@ Resources:
         CpuArchitecture: X86_64
       ContainerDefinitions:
         - Name: app
-          Image: !Ref InitialImage
+          Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ProjectName}-app:latest"
           PortMappings:
             - ContainerPort: !Ref ContainerPort
               Protocol: tcp
