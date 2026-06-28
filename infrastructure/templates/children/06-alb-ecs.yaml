@@ -39,6 +39,17 @@ Parameters:
     Type: Number
   CpuTargetUtilization:
     Type: Number
+  ContainerCpu:
+    Type: Number
+  ContainerMemory:
+    Type: Number
+  InitialImage:
+    Type: String
+    Description: Placeholder image used only to create the service; CodeDeploy replaces it on first deploy
+  TaskExecutionRoleArn:
+    Type: String
+  TaskRoleArn:
+    Type: String
   ProxySecurityGroupId:
     Type: String
   CacheSecurityGroupId:
@@ -211,12 +222,45 @@ Resources:
         - Name: containerInsights
           Value: enabled
 
+  # Initial task definition needed to CREATE the service. With the CODE_DEPLOY
+  # controller, CloudFormation requires one at creation but ignores later changes
+  # to it — CodeDeploy registers and deploys real revisions (from the app repo's
+  # taskdef.json) thereafter. The placeholder image serves HTTP 200 on the
+  # container port so the service can stabilize before the first real deploy.
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "${ProjectName}-task"
+      Cpu: !Ref ContainerCpu
+      Memory: !Ref ContainerMemory
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      ExecutionRoleArn: !Ref TaskExecutionRoleArn
+      TaskRoleArn: !Ref TaskRoleArn
+      RuntimePlatform:
+        OperatingSystemFamily: LINUX
+        CpuArchitecture: X86_64
+      ContainerDefinitions:
+        - Name: app
+          Image: !Ref InitialImage
+          PortMappings:
+            - ContainerPort: !Ref ContainerPort
+              Protocol: tcp
+          Essential: true
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: app
+
   Service:
     Type: AWS::ECS::Service
     DependsOn: HttpListener
     Properties:
       ServiceName: !Sub "${ProjectName}-service"
       Cluster: !Ref Cluster
+      TaskDefinition: !Ref TaskDefinition
       DesiredCount: !Ref DesiredCount
       LaunchType: FARGATE
       PlatformVersion: LATEST

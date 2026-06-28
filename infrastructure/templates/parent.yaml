@@ -99,6 +99,16 @@ Parameters:
   CpuTargetUtilization:
     Type: Number
     Default: 60
+  ContainerCpu:
+    Type: Number
+    Default: 512
+  ContainerMemory:
+    Type: Number
+    Default: 1024
+  InitialImage:
+    Type: String
+    Default: public.ecr.aws/nginx/nginx-unprivileged:stable
+    Description: Placeholder image to bootstrap the ECS service; CodeDeploy swaps in the real app image
   TemplateVersion:
     Type: String
     Default: initial
@@ -213,6 +223,11 @@ Resources:
         MinCapacity:           !Ref MinCapacity
         MaxCapacity:           !Ref MaxCapacity
         CpuTargetUtilization:  !Ref CpuTargetUtilization
+        ContainerCpu:          !Ref ContainerCpu
+        ContainerMemory:       !Ref ContainerMemory
+        InitialImage:          !Ref InitialImage
+        TaskExecutionRoleArn:  !GetAtt IamStack.Outputs.TaskExecutionRoleArn
+        TaskRoleArn:           !GetAtt IamStack.Outputs.TaskRoleArn
         ProxySecurityGroupId:  !GetAtt DatabaseStack.Outputs.ProxySecurityGroupId
         CacheSecurityGroupId:  !GetAtt CacheStack.Outputs.CacheSecurityGroupId
         TemplateVersion:       !Ref TemplateVersion
