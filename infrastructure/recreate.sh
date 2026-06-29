@@ -4,21 +4,19 @@
 #
 #   Usage:  ./recreate.sh            (run from anywhere; resolves its own paths)
 #
-#   It performs the scriptable prerequisites GitSync needs, then triggers /
-#   guides the GitSync deployment:
-#
+#   Steps:
 #     1. Deploy the bootstrap stack        -> templates S3 bucket + infra OIDC role
-#     2. Make sure deployment.yaml's TemplatesBaseUrl matches that bucket
+#     2. Verify deployment.yaml's TemplatesBaseUrl matches that bucket
 #     3. Full-sync templates/ to the bucket  (so GitSync can instantiate the
-#        nested stacks on its very first run — avoids the upload/deploy race)
-#     4a. If the parent stack is ALREADY GitSync-linked: bump TemplateVersion,
-#         commit + push to the branch -> GitSync redeploys. Then poll.
-#     4b. If it is NOT linked (the usual case after a full teardown): print the
-#         one-time console steps to link GitSync, then poll until it appears.
+#        nested stacks — avoids the upload/deploy race)
+#     4. Ensure the GitSync sync configuration exists (it survives teardown; if
+#        missing, guide the one-time console link and poll until it appears)
+#     5. Sync with origin, bump TemplateVersion, push -> GitSync deploys the real
+#        parent.yaml (all nested stacks). Then verify the nested stacks exist.
 #
-#   GitSync's repo connection (CodeConnections) and sync configuration cannot be
-#   created via the CLI, so 4b is unavoidable on a fresh recreate. The CodeConnections
-#   connection itself persists across teardowns, so re-linking is quick.
+#   GitSync's repo connection (CodeConnections) cannot be created via the CLI,
+#   so the one-time console link in step 4 is unavoidable on a fresh recreate.
+#   The connection persists across teardowns, so re-linking is rarely needed.
 #
 #   Override via env vars if names differ: REGION PROJECT PARENT_STACK BOOTSTRAP_STACK BRANCH
 # =============================================================================
@@ -126,6 +124,15 @@ fi
 # nested stacks) — without it, a freshly-linked stack stays as the setup stub.
 echo
 echo "== Step 5: deploy parent + nested stacks via GitSync (push) =="
+# Sync with origin FIRST so our bump lands on top of any commit the GitHub Action
+# already pushed (it auto-bumps TemplateVersion on template changes). This avoids
+# the diverged-history / rebase-conflict loop.
+echo "  syncing local branch with origin/$BRANCH ..."
+if ! git -C "$REPO_ROOT" pull --rebase --autostash origin "$BRANCH"; then
+  echo "  ERROR: 'git pull --rebase' hit a conflict. Aborting it — resolve manually, then re-run."
+  git -C "$REPO_ROOT" rebase --abort 2>/dev/null || true
+  exit 1
+fi
 TS="$(date -u +%Y%m%d%H%M%S)"
 sed -i "s/^  TemplateVersion:.*/  TemplateVersion: recreate-${TS}/" "$DEPLOY_FILE"
 git -C "$REPO_ROOT" add "$DEPLOY_FILE_REL"

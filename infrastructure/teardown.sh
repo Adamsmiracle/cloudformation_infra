@@ -79,6 +79,23 @@ delete_stack() {
   fi
 }
 
+# Delete the CloudFormation GitSync sync configuration (a CodeConnections
+# resource that survives stack deletion). Removing it means a future re-link via
+# the "Sync from Git" wizard won't fail with ResourceAlreadyExistsException (409).
+delete_sync_config() {
+  local s="$1"
+  if aws codeconnections get-sync-configuration --sync-type CFN_STACK_SYNC \
+       --resource-name "$s" --region "$REGION" >/dev/null 2>&1; then
+    echo "Deleting GitSync sync configuration for: $s"
+    aws codeconnections delete-sync-configuration --sync-type CFN_STACK_SYNC \
+      --resource-name "$s" --region "$REGION" \
+      && echo "  sync config for $s deleted." \
+      || echo "  WARN: could not delete sync config for $s — remove it manually in the console."
+  else
+    echo "No GitSync sync configuration for $s — skipping."
+  fi
+}
+
 # --- 1. clear deletion blockers --------------------------------------------
 echo
 echo "== Step 1: empty buckets + ECR images =="
@@ -100,6 +117,11 @@ delete_stack "$PARENT_STACK"
 echo
 echo "== Step 3: delete bootstrap stack =="
 delete_stack "$BOOTSTRAP_STACK"
+
+# --- 3b. delete the GitSync sync configuration -----------------------------
+echo
+echo "== Step 3b: delete GitSync sync configuration =="
+delete_sync_config "$PARENT_STACK"
 
 # --- 4. remove retained buckets (templates bucket has DeletionPolicy: Retain) -
 echo
@@ -123,4 +145,5 @@ echo -n "CloudFront   : "; aws cloudfront list-distributions --query "Distributi
 
 echo
 echo "Teardown complete. (GitHub OIDC provider left intact — it is account-global and reused.)"
-echo "Note: don't push to the '${PARENT_STACK}' infra branch until you re-bootstrap, or GitSync may recreate the stack."
+echo "The GitSync sync configuration was removed, so recreating via the console 'Sync from Git'"
+echo "wizard (or ./recreate.sh, which guides it) will NOT hit the 'already exists' 409."
