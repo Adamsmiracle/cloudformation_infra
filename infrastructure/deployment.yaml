@@ -18,6 +18,6 @@ parameters:
   # bootstrap task def. The REAL app task sizing comes from the app repo's
   # taskdef.json via CodeDeploy.
   # ---- Bumped on every infra-repo push to force nested stack refresh ----
-  TemplateVersion: sha-c7e65ce
+  TemplateVersion: sha-ccd35d1
 tags:
   Project: photo-uploader
