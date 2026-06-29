@@ -16,9 +16,9 @@ parameters:
   # it — task sizing must come from the app repo's taskdef.json via CodeDeploy.
   # ---- Initial value; GitHub Actions bumps it on each upload ----
 <<<<<<< HEAD
-  TemplateVersion: sha-c125c16
+  TemplateVersion: sha-c7e65ce
 =======
-  TemplateVersion: recreate-20260629124555
+  TemplateVersion: sha-c7e65ce
 >>>>>>> 0790aa7 (chore: trigger gitsync recreate (20260629124555))
 tags:
   Project: photo-uploader
