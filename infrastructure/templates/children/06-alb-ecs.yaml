@@ -35,6 +35,14 @@ Parameters:
     Type: Number
   CpuTargetUtilization:
     Type: Number
+  ContainerCpu:
+    Type: Number
+  ContainerMemory:
+    Type: Number
+  TaskExecutionRoleArn:
+    Type: String
+  TaskRoleArn:
+    Type: String
   DbSecurityGroupId:
     Type: String
   TemplateVersion:
@@ -190,12 +198,47 @@ Resources:
         - Name: containerInsights
           Value: enabled
 
+  # Initial task definition needed to CREATE the service. With the CODE_DEPLOY
+  # controller, CloudFormation requires one at creation but ignores later changes
+  # to it — CodeDeploy registers/deploys real revisions (from the app repo's
+  # taskdef.json) thereafter. The image points at the PRIVATE ECR repo (pullable
+  # via the VPC endpoints, no NAT). The service is created with DesiredCount 0 so
+  # the stack completes without a running task; App Auto Scaling brings tasks up
+  # once the app image has been pushed to ECR.
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "${ProjectName}-task"
+      Cpu: !Ref ContainerCpu
+      Memory: !Ref ContainerMemory
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      ExecutionRoleArn: !Ref TaskExecutionRoleArn
+      TaskRoleArn: !Ref TaskRoleArn
+      RuntimePlatform:
+        OperatingSystemFamily: LINUX
+        CpuArchitecture: X86_64
+      ContainerDefinitions:
+        - Name: app
+          Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ProjectName}-app:latest"
+          PortMappings:
+            - ContainerPort: !Ref ContainerPort
+              Protocol: tcp
+          Essential: true
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: app
+
   Service:
     Type: AWS::ECS::Service
     DependsOn: HttpListener
     Properties:
       ServiceName: !Sub "${ProjectName}-service"
       Cluster: !Ref Cluster
+      TaskDefinition: !Ref TaskDefinition
       DesiredCount: !Ref DesiredCount
       LaunchType: FARGATE
       PlatformVersion: LATEST

@@ -81,6 +81,12 @@ Parameters:
   CpuTargetUtilization:
     Type: Number
     Default: 60
+  ContainerCpu:
+    Type: Number
+    Default: 512
+  ContainerMemory:
+    Type: Number
+    Default: 1024
   TemplateVersion:
     Type: String
     Default: initial
@@ -208,6 +214,10 @@ Resources:
         MinCapacity:          !Ref MinCapacity
         MaxCapacity:          !Ref MaxCapacity
         CpuTargetUtilization: !Ref CpuTargetUtilization
+        ContainerCpu:         !Ref ContainerCpu
+        ContainerMemory:      !Ref ContainerMemory
+        TaskExecutionRoleArn: !GetAtt IamStack.Outputs.TaskExecutionRoleArn
+        TaskRoleArn:          !GetAtt IamStack.Outputs.TaskRoleArn
         DbSecurityGroupId:    !GetAtt DatabaseStack.Outputs.DbSecurityGroupId
         TemplateVersion:      !Ref TemplateVersion
       Tags:
