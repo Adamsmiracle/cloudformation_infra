@@ -87,23 +87,18 @@ wait_for_stack() {
   echo; echo "  timed out waiting for $s"; return 2
 }
 
-# --- 4. trigger or guide GitSync -------------------------------------------
+# --- 4. ensure the GitSync sync configuration exists -----------------------
+# GitSync deploys on push ONLY if a CodeConnections sync configuration exists.
+# That config survives a stack teardown, so detect it (not the stack). If it is
+# missing, link it once via the console wizard (the GitHub connection persists).
 echo
-echo "== Step 4: GitSync deployment =="
-if aws cloudformation describe-stacks --stack-name "$PARENT_STACK" --region "$REGION" >/dev/null 2>&1; then
-  echo "  Parent stack '$PARENT_STACK' exists and is GitSync-managed — triggering a redeploy via push."
-  TS="$(date -u +%Y%m%d%H%M%S)"
-  sed -i "s/^  TemplateVersion:.*/  TemplateVersion: recreate-${TS}/" "$DEPLOY_FILE"
-  git -C "$REPO_ROOT" add "$DEPLOY_FILE_REL"
-  git -C "$REPO_ROOT" commit -m "chore: trigger gitsync recreate (${TS})" >/dev/null
-  git -C "$REPO_ROOT" push origin "$BRANCH"
-  echo "  Pushed. Waiting for GitSync to apply the update..."
-  wait_for_stack "$PARENT_STACK"
+echo "== Step 4: ensure GitSync is linked =="
+if aws codeconnections get-sync-configuration --sync-type CFN_STACK_SYNC \
+     --resource-name "$PARENT_STACK" --region "$REGION" >/dev/null 2>&1; then
+  echo "  sync configuration for '$PARENT_STACK' already present."
 else
   cat <<EOF
-  Parent stack '$PARENT_STACK' is NOT present, so GitSync isn't linked yet.
-  Link it once in the console (the CodeConnections GitHub connection persists,
-  so this is fast) — CloudFormation will then create the stack from deployment.yaml:
+  No GitSync sync configuration found for '$PARENT_STACK'. Link it once:
 
     CloudFormation console -> Create stack -> "Sync from Git"
       Stack name      : $PARENT_STACK
@@ -111,13 +106,46 @@ else
       Repository      : Adamsmiracle/cloudformation_infra
       Branch          : $BRANCH
       Deployment file : $DEPLOY_FILE_REL
-      Deployment role : the CloudFormation Git-sync role (let the console create one
-                        with enough permissions to provision all resources)
+      Deployment role : let the console create the CloudFormation Git-sync role
 
-  Templates are already in s3://$BUCKET, so the first sync will resolve the nested stacks.
-  Waiting for the stack to appear (finish the wizard in the console)...
+  (The wizard first creates a small "setup" stub stack — that's expected; the
+  next step pushes a commit so GitSync deploys the real template.)
 EOF
-  wait_for_stack "$PARENT_STACK"
+  printf "  Waiting for the sync configuration to appear (finish the wizard)"
+  waited=0
+  until aws codeconnections get-sync-configuration --sync-type CFN_STACK_SYNC \
+          --resource-name "$PARENT_STACK" --region "$REGION" >/dev/null 2>&1; do
+    printf '.'; sleep 15; waited=$((waited + 15))
+    if [ "$waited" -ge 900 ]; then echo; echo "  timed out — re-run after linking."; exit 1; fi
+  done
+  echo; echo "  sync configuration detected."
+fi
+
+# --- 5. push a commit so GitSync deploys the REAL parent template ----------
+# A new commit on the branch is what makes GitSync apply parent.yaml (the 7
+# nested stacks) — without it, a freshly-linked stack stays as the setup stub.
+echo
+echo "== Step 5: deploy parent + nested stacks via GitSync (push) =="
+TS="$(date -u +%Y%m%d%H%M%S)"
+sed -i "s/^  TemplateVersion:.*/  TemplateVersion: recreate-${TS}/" "$DEPLOY_FILE"
+git -C "$REPO_ROOT" add "$DEPLOY_FILE_REL"
+git -C "$REPO_ROOT" commit -m "chore: trigger gitsync deploy (${TS})" >/dev/null 2>&1 \
+  || echo "  (no deployment.yaml change to commit)"
+git -C "$REPO_ROOT" push origin "$BRANCH"
+echo "  Pushed. Waiting for GitSync to deploy the full stack..."
+wait_for_stack "$PARENT_STACK"
+
+# Verify the real template (the AWS::CloudFormation::Stack children) was applied,
+# not just the GitSync setup stub (which has 0 nested stacks).
+NESTED="$(aws cloudformation describe-stack-resources --stack-name "$PARENT_STACK" --region "$REGION" \
+  --query "length(StackResources[?ResourceType=='AWS::CloudFormation::Stack'])" --output text 2>/dev/null)"
+echo
+if [ -z "$NESTED" ] || [ "$NESTED" = "0" ] || [ "$NESTED" = "None" ]; then
+  echo "WARNING: 0 nested stacks — the stack still holds only the GitSync setup stub."
+  echo "  Check CloudFormation console -> '$PARENT_STACK' -> 'Git sync' tab for the sync"
+  echo "  status, confirm the children are in s3://$BUCKET, then push another commit."
+else
+  echo "Nested stacks created/updated: $NESTED ✅"
 fi
 
 echo
