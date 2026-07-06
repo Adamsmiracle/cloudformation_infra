@@ -44,5 +44,22 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add infrastructure/deployment.yaml
+          # Nothing changed (templates re-synced but content identical) → skip.
+          if git diff --cached --quiet; then
+            echo "TemplateVersion unchanged — nothing to commit."
+            exit 0
+          fi
           git commit -m "ci: bump TemplateVersion to sha-$(echo ${{ github.sha }} | cut -c1-7)"
-          git push
+          # The branch may have advanced (concurrent runs, manual pushes), so a
+          # plain push can be rejected non-fast-forward. Rebase our single bump
+          # commit onto the latest todo and retry a few times before failing.
+          for attempt in 1 2 3 4 5; do
+            if git push origin HEAD:todo; then
+              echo "Pushed on attempt $attempt."
+              exit 0
+            fi
+            echo "Push rejected — rebasing onto latest todo (attempt $attempt)."
+            git pull --rebase origin todo
+          done
+          echo "Failed to push TemplateVersion bump after 5 attempts." >&2
+          exit 1
