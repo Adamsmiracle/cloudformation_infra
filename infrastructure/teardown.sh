@@ -79,23 +79,6 @@ delete_stack() {
   fi
 }
 
-# Delete the CloudFormation GitSync sync configuration (a CodeConnections
-# resource that survives stack deletion). Removing it means a future re-link via
-# the "Sync from Git" wizard won't fail with ResourceAlreadyExistsException (409).
-delete_sync_config() {
-  local s="$1"
-  if aws codeconnections get-sync-configuration --sync-type CFN_STACK_SYNC \
-       --resource-name "$s" --region "$REGION" >/dev/null 2>&1; then
-    echo "Deleting GitSync sync configuration for: $s"
-    aws codeconnections delete-sync-configuration --sync-type CFN_STACK_SYNC \
-      --resource-name "$s" --region "$REGION" \
-      && echo "  sync config for $s deleted." \
-      || echo "  WARN: could not delete sync config for $s — remove it manually in the console."
-  else
-    echo "No GitSync sync configuration for $s — skipping."
-  fi
-}
-
 # --- 1. clear deletion blockers --------------------------------------------
 echo
 echo "== Step 1: empty buckets + ECR images =="
@@ -118,10 +101,9 @@ echo
 echo "== Step 3: delete bootstrap stack =="
 delete_stack "$BOOTSTRAP_STACK"
 
-# --- 3b. delete the GitSync sync configuration -----------------------------
-echo
-echo "== Step 3b: delete GitSync sync configuration =="
-delete_sync_config "$PARENT_STACK"
+# Note: the CloudFormation GitSync sync configuration is intentionally LEFT in
+# place. It survives teardown harmlessly and lets recreate.sh redeploy with just
+# a git push — no console "Sync from Git" wizard, no 409. Do not delete it here.
 
 # --- 4. remove retained buckets (templates bucket has DeletionPolicy: Retain) -
 echo
