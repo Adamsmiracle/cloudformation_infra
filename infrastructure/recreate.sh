@@ -1,34 +1,32 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Recreate the todo-app infrastructure and let CloudFormation GitSync deploy it.
+# Recreate the photo-uploader infrastructure and let CloudFormation GitSync deploy it.
 #
 #   Usage:  ./recreate.sh            (run from anywhere; resolves its own paths)
 #
-#   It performs the scriptable prerequisites GitSync needs, then triggers /
-#   guides the GitSync deployment:
-#
+#   Steps:
 #     1. Deploy the bootstrap stack        -> templates S3 bucket + infra OIDC role
-#     2. Make sure deployment.yaml's TemplatesBaseUrl matches that bucket
+#     2. Verify deployment.yaml's TemplatesBaseUrl matches that bucket
 #     3. Full-sync templates/ to the bucket  (so GitSync can instantiate the
-#        nested stacks on its very first run — avoids the upload/deploy race)
-#     4a. If the parent stack is ALREADY GitSync-linked: bump TemplateVersion,
-#         commit + push to the branch -> GitSync redeploys. Then poll.
-#     4b. If it is NOT linked (the usual case after a full teardown): print the
-#         one-time console steps to link GitSync, then poll until it appears.
+#        nested stacks — avoids the upload/deploy race)
+#     4. Ensure the GitSync sync configuration exists (it survives teardown; if
+#        missing, guide the one-time console link and poll until it appears)
+#     5. Sync with origin, bump TemplateVersion, push -> GitSync deploys the real
+#        parent.yaml (all nested stacks). Then verify the nested stacks exist.
 #
-#   GitSync's repo connection (CodeConnections) and sync configuration cannot be
-#   created via the CLI, so 4b is unavoidable on a fresh recreate. The CodeConnections
-#   connection itself persists across teardowns, so re-linking is quick.
+#   GitSync's repo connection (CodeConnections) cannot be created via the CLI,
+#   so the one-time console link in step 4 is unavoidable on a fresh recreate.
+#   The connection persists across teardowns, so re-linking is rarely needed.
 #
 #   Override via env vars if names differ: REGION PROJECT PARENT_STACK BOOTSTRAP_STACK BRANCH
 # =============================================================================
 set -uo pipefail
 
 REGION="${REGION:-${AWS_REGION:-eu-central-1}}"
-PROJECT="${PROJECT:-todo-app}"
-PARENT_STACK="${PARENT_STACK:-todo}"
-BOOTSTRAP_STACK="${BOOTSTRAP_STACK:-todo-app-bootstrap}"
-BRANCH="${BRANCH:-todo}"
+PROJECT="${PROJECT:-photo-uploader}"
+PARENT_STACK="${PARENT_STACK:-photo-uploader}"
+BOOTSTRAP_STACK="${BOOTSTRAP_STACK:-photo-uploader-bootstrap}"
+BRANCH="${BRANCH:-photo_upload}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # infrastructure/
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"                    # infra repo root
@@ -53,6 +51,31 @@ aws cloudformation deploy \
   --parameter-overrides ProjectName="$PROJECT" \
   --capabilities CAPABILITY_NAMED_IAM \
   --region "$REGION" || { echo "  bootstrap deploy reported no-op or error (continuing)"; }
+
+# --- 1b. guarantee the templates bucket actually exists --------------------
+# A partial teardown can leave the bootstrap stack PRESENT but its (retained)
+# bucket deleted. In that drifted state the 'deploy' above is a no-op and does
+# NOT recreate the bucket, so the sync in step 3 would fail with NoSuchBucket
+# and every nested stack would fail with "bucket does not exist". Detect the
+# drift and force a clean bootstrap recreate so the bucket comes back.
+echo
+echo "== Step 1b: verify templates bucket exists =="
+if aws s3api head-bucket --bucket "$BUCKET" --region "$REGION" 2>/dev/null; then
+  echo "  OK -> $BUCKET"
+else
+  echo "  bucket '$BUCKET' MISSING (drifted bootstrap). Recreating the bootstrap stack..."
+  aws cloudformation delete-stack --stack-name "$BOOTSTRAP_STACK" --region "$REGION"
+  aws cloudformation wait stack-delete-complete --stack-name "$BOOTSTRAP_STACK" --region "$REGION" 2>/dev/null || true
+  aws cloudformation deploy \
+    --template-file "$SCRIPT_DIR/00-bootstrap.yaml" \
+    --stack-name "$BOOTSTRAP_STACK" \
+    --parameter-overrides ProjectName="$PROJECT" \
+    --capabilities CAPABILITY_NAMED_IAM \
+    --region "$REGION"
+  aws s3api head-bucket --bucket "$BUCKET" --region "$REGION" 2>/dev/null \
+    || { echo "  ERROR: bucket still missing after bootstrap recreate. Aborting."; exit 1; }
+  echo "  bucket recreated -> $BUCKET"
+fi
 
 # --- 2. verify deployment.yaml points at this bucket -----------------------
 echo
@@ -87,23 +110,18 @@ wait_for_stack() {
   echo; echo "  timed out waiting for $s"; return 2
 }
 
-# --- 4. trigger or guide GitSync -------------------------------------------
+# --- 4. ensure the GitSync sync configuration exists -----------------------
+# GitSync deploys on push ONLY if a CodeConnections sync configuration exists.
+# That config survives a stack teardown, so detect it (not the stack). If it is
+# missing, link it once via the console wizard (the GitHub connection persists).
 echo
-echo "== Step 4: GitSync deployment =="
-if aws cloudformation describe-stacks --stack-name "$PARENT_STACK" --region "$REGION" >/dev/null 2>&1; then
-  echo "  Parent stack '$PARENT_STACK' exists and is GitSync-managed — triggering a redeploy via push."
-  TS="$(date -u +%Y%m%d%H%M%S)"
-  sed -i "s/^  TemplateVersion:.*/  TemplateVersion: recreate-${TS}/" "$DEPLOY_FILE"
-  git -C "$REPO_ROOT" add "$DEPLOY_FILE_REL"
-  git -C "$REPO_ROOT" commit -m "chore: trigger gitsync recreate (${TS})" >/dev/null
-  git -C "$REPO_ROOT" push origin "$BRANCH"
-  echo "  Pushed. Waiting for GitSync to apply the update..."
-  wait_for_stack "$PARENT_STACK"
+echo "== Step 4: ensure GitSync is linked =="
+if aws codeconnections get-sync-configuration --sync-type CFN_STACK_SYNC \
+     --resource-name "$PARENT_STACK" --region "$REGION" >/dev/null 2>&1; then
+  echo "  sync configuration for '$PARENT_STACK' already present."
 else
   cat <<EOF
-  Parent stack '$PARENT_STACK' is NOT present, so GitSync isn't linked yet.
-  Link it once in the console (the CodeConnections GitHub connection persists,
-  so this is fast) — CloudFormation will then create the stack from deployment.yaml:
+  No GitSync sync configuration found for '$PARENT_STACK'. Link it once:
 
     CloudFormation console -> Create stack -> "Sync from Git"
       Stack name      : $PARENT_STACK
@@ -111,13 +129,55 @@ else
       Repository      : Adamsmiracle/cloudformation_infra
       Branch          : $BRANCH
       Deployment file : $DEPLOY_FILE_REL
-      Deployment role : the CloudFormation Git-sync role (let the console create one
-                        with enough permissions to provision all resources)
+      Deployment role : let the console create the CloudFormation Git-sync role
 
-  Templates are already in s3://$BUCKET, so the first sync will resolve the nested stacks.
-  Waiting for the stack to appear (finish the wizard in the console)...
+  (The wizard first creates a small "setup" stub stack — that's expected; the
+  next step pushes a commit so GitSync deploys the real template.)
 EOF
-  wait_for_stack "$PARENT_STACK"
+  printf "  Waiting for the sync configuration to appear (finish the wizard)"
+  waited=0
+  until aws codeconnections get-sync-configuration --sync-type CFN_STACK_SYNC \
+          --resource-name "$PARENT_STACK" --region "$REGION" >/dev/null 2>&1; do
+    printf '.'; sleep 15; waited=$((waited + 15))
+    if [ "$waited" -ge 900 ]; then echo; echo "  timed out — re-run after linking."; exit 1; fi
+  done
+  echo; echo "  sync configuration detected."
+fi
+
+# --- 5. push a commit so GitSync deploys the REAL parent template ----------
+# A new commit on the branch is what makes GitSync apply parent.yaml (the 7
+# nested stacks) — without it, a freshly-linked stack stays as the setup stub.
+echo
+echo "== Step 5: deploy parent + nested stacks via GitSync (push) =="
+# Sync with origin FIRST so our bump lands on top of any commit the GitHub Action
+# already pushed (it auto-bumps TemplateVersion on template changes). This avoids
+# the diverged-history / rebase-conflict loop.
+echo "  syncing local branch with origin/$BRANCH ..."
+if ! git -C "$REPO_ROOT" pull --rebase --autostash origin "$BRANCH"; then
+  echo "  ERROR: 'git pull --rebase' hit a conflict. Aborting it — resolve manually, then re-run."
+  git -C "$REPO_ROOT" rebase --abort 2>/dev/null || true
+  exit 1
+fi
+TS="$(date -u +%Y%m%d%H%M%S)"
+sed -i "s/^  TemplateVersion:.*/  TemplateVersion: recreate-${TS}/" "$DEPLOY_FILE"
+git -C "$REPO_ROOT" add "$DEPLOY_FILE_REL"
+git -C "$REPO_ROOT" commit -m "chore: trigger gitsync deploy (${TS})" >/dev/null 2>&1 \
+  || echo "  (no deployment.yaml change to commit)"
+git -C "$REPO_ROOT" push origin "$BRANCH"
+echo "  Pushed. Waiting for GitSync to deploy the full stack..."
+wait_for_stack "$PARENT_STACK"
+
+# Verify the real template (the AWS::CloudFormation::Stack children) was applied,
+# not just the GitSync setup stub (which has 0 nested stacks).
+NESTED="$(aws cloudformation describe-stack-resources --stack-name "$PARENT_STACK" --region "$REGION" \
+  --query "length(StackResources[?ResourceType=='AWS::CloudFormation::Stack'])" --output text 2>/dev/null)"
+echo
+if [ -z "$NESTED" ] || [ "$NESTED" = "0" ] || [ "$NESTED" = "None" ]; then
+  echo "WARNING: 0 nested stacks — the stack still holds only the GitSync setup stub."
+  echo "  Check CloudFormation console -> '$PARENT_STACK' -> 'Git sync' tab for the sync"
+  echo "  status, confirm the children are in s3://$BUCKET, then push another commit."
+else
+  echo "Nested stacks created/updated: $NESTED ✅"
 fi
 
 echo
