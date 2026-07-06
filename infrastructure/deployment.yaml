@@ -2,7 +2,7 @@ template-file-path: infrastructure/templates/parent.yaml
 parameters:
   ProjectName: todo-app
   # ---- Filled in from the todo-app bootstrap stack outputs ----
-  TemplatesBaseUrl: https://s3.eu-central-1.amazonaws.com/todo-app-cfn-templates-825765391206-eu-central-1
+  TemplatesBaseUrl: https://s3.eu-central-1.amazonaws.com/todo-cfn-templates-825765391206-eu-central-1
   # ---- App repo identity for the GitHub Actions OIDC role (child 02-iam) ----
   GitHubOrg: Adamsmiracle
   AppRepoName: aws_lab_applications
