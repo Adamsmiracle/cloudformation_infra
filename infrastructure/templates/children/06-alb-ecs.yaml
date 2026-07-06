@@ -13,7 +13,6 @@ Description: Child stack — ALB + ECS Fargate (blue/green ready) + CPU autoscal
 # The task definition is NOT managed here. The app repo pushes taskdef.json
 # inside deploy-bundle.zip to S3; CodeDeploy registers and deploys it.
 
-
 Parameters:
   ProjectName:
     Type: String

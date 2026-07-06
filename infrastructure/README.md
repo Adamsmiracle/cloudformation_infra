@@ -1,4 +1,4 @@
-# photo-uploader-lab-infra
+# todo-lab-infra
 
 Nested-stack CloudFormation deployment for the ECS CI/CD lab. The **parent**
 template is deployed by GitSync; **child** templates live in S3 and are
@@ -55,7 +55,7 @@ manually:
 
 ```bash
 aws cloudformation deploy \
-  --stack-name photo-uploader-bootstrap \
+  --stack-name todo-bootstrap \
   --template-file 00-bootstrap.yaml \
   --parameter-overrides GitHubOrg=adamsMiracle InfraRepoName=infra-repo \
   --capabilities CAPABILITY_NAMED_IAM \

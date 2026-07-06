@@ -1,4 +1,4 @@
-# Stack Explained — photo-uploader
+# Stack Explained — todo
 
 A **photo-gallery web app** built as a CloudFormation nested-stack system managed by **CloudFormation GitSync**.
 Users upload photos via a containerised app on **ECS Fargate**; images land in a private **S3 bucket** served through **CloudFront**; metadata is stored in **RDS PostgreSQL**; every image push triggers an automated **blue/green deployment** through CodePipeline + CodeDeploy.
@@ -86,7 +86,7 @@ All **application** IAM roles in one place. Every policy scope uses name-derived
 
 | Resource | Type | What it does |
 |---|---|---|
-| `GitHubActionsEcrPushRole` | `AWS::IAM::Role` | OIDC role for the **app repo's** GitHub Actions workflow. Trust scoped to `repo:Adamsmiracle/aws_lab_applications:*`. Allows: ECR image push to the `photo-uploader-app` repo, and read/write of the deploy bundle in the deploy-source S3 bucket. Nothing else. |
+| `GitHubActionsEcrPushRole` | `AWS::IAM::Role` | OIDC role for the **app repo's** GitHub Actions workflow. Trust scoped to `repo:Adamsmiracle/aws_lab_applications:*`. Allows: ECR image push to the `todo-app` repo, and read/write of the deploy bundle in the deploy-source S3 bucket. Nothing else. |
 | `TaskExecutionRole` | `AWS::IAM::Role` | Assumed by the **ECS agent** (not the app container). Attaches the managed `AmazonECSTaskExecutionRolePolicy` — enough to pull images from ECR and write logs to CloudWatch. |
 | `TaskRole` | `AWS::IAM::Role` | Assumed by the **running app container**. Grants: ECS Exec SSM channel actions; read/write/delete on image bucket objects; list on the image bucket; read SSM parameters under `/${ProjectName}/*`; read the `rds!db-*` Secrets Manager secret for DB credentials. |
 | `CodeDeployRole` | `AWS::IAM::Role` | Service role for CodeDeploy. Attaches the managed `AWSCodeDeployRoleForECS` — lets CodeDeploy orchestrate ECS blue/green traffic shifting. |
@@ -129,7 +129,7 @@ RDS PostgreSQL for photo metadata. Private, not publicly accessible, credentials
 
 | Resource | Type | What it does |
 |---|---|---|
-| `EcrRepository` | `AWS::ECR::Repository` | Container image registry named `photo-uploader-app`. `MUTABLE` tags so the workflow can overwrite `latest` on every build (the tag CodePipeline tracks). Scan-on-push enabled, AES256 encryption, lifecycle rule retains only the last 10 images. CodeDeploy pins the resolved image digest in the task definition at deploy time, providing rollback safety without per-SHA tags. |
+| `EcrRepository` | `AWS::ECR::Repository` | Container image registry named `todo-app`. `MUTABLE` tags so the workflow can overwrite `latest` on every build (the tag CodePipeline tracks). Scan-on-push enabled, AES256 encryption, lifecycle rule retains only the last 10 images. CodeDeploy pins the resolved image digest in the task definition at deploy time, providing rollback safety without per-SHA tags. |
 
 ---
 

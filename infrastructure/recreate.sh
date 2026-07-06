@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Recreate the photo-uploader infrastructure and let CloudFormation GitSync deploy it.
+# Recreate the todo infrastructure and let CloudFormation GitSync deploy it.
 #
 #   Usage:  ./recreate.sh            (run from anywhere; resolves its own paths)
 #
@@ -23,9 +23,9 @@
 set -uo pipefail
 
 REGION="${REGION:-${AWS_REGION:-eu-central-1}}"
-PROJECT="${PROJECT:-photo-uploader}"
-PARENT_STACK="${PARENT_STACK:-photo-uploader}"
-BOOTSTRAP_STACK="${BOOTSTRAP_STACK:-photo-uploader-bootstrap}"
+PROJECT="${PROJECT:-todo}"
+PARENT_STACK="${PARENT_STACK:-todo}"
+BOOTSTRAP_STACK="${BOOTSTRAP_STACK:-todo-bootstrap}"
 BRANCH="${BRANCH:-photo_upload}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # infrastructure/

@@ -8,7 +8,7 @@ Description: >
 Parameters:
   ProjectName:
     Type: String
-    Default: photo-uploader
+    Default: todo
   GitHubOrg:
     Type: String
     Description: username that owns the infrastructure repo
