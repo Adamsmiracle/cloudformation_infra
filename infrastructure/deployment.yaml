@@ -1,25 +1,3 @@
-template-file-path: infrastructure/templates/parent.yaml
-parameters:
-  ProjectName: todo-app
-  # ---- Filled in from the todo-app bootstrap stack outputs ----
-  TemplatesBaseUrl: https://s3.eu-central-1.amazonaws.com/todo-app-cfn-templates-825765391206-eu-central-1
-  # ---- App repo identity for the GitHub Actions OIDC role (child 02-iam) ----
-  GitHubOrg: Adamsmiracle
-  AppRepoName: aws_lab_applications
-  # ---- ECS autoscaling: min 1 / max 4, CPU target tracking.
-  # The service is created with DesiredCount 0 so the stack completes before any
-  # app image exists in ECR (the tasks pull from the private ECR repo via VPC
-  # endpoints). App Auto Scaling (MinCapacity 1) then enforces a running floor of
-  # 1 once the image is pushed — and since MinCapacity is enforced by the
-  # ScalableTarget, not DesiredCount, it never triggers an ECS update on the
-  # CODE_DEPLOY controller.
-  MinCapacity: 1
-  DesiredCount: 0
-  MaxCapacity: 4
-  # NOTE: ECS task CPU/memory is NOT set here. The service uses the CODE_DEPLOY
-  # deployment controller, so CloudFormation cannot change the task definition on
-  # it — task sizing must come from the app repo's taskdef.json via CodeDeploy.
-  # ---- Initial value; GitHub Actions bumps it on each upload ----
-  TemplateVersion: sha-b6934cd
-tags:
-  Project: todo-app
+template-file-path: template.yaml
+parameters: {}
+tags: {}
