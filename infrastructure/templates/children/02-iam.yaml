@@ -13,7 +13,6 @@ Description: >
   ProjectName) rather than cross-stack !GetAtt, so this stack has no dependency
   on the registry/compute/pipeline stacks and can be created before them.
 
-
 Parameters:
   ProjectName:
     Type: String
