@@ -52,6 +52,31 @@ aws cloudformation deploy \
   --capabilities CAPABILITY_NAMED_IAM \
   --region "$REGION" || { echo "  bootstrap deploy reported no-op or error (continuing)"; }
 
+# --- 1b. guarantee the templates bucket actually exists --------------------
+# A partial teardown can leave the bootstrap stack PRESENT but its (retained)
+# bucket deleted. In that drifted state the 'deploy' above is a no-op and does
+# NOT recreate the bucket, so the sync in step 3 would fail with NoSuchBucket
+# and every nested stack would fail with "bucket does not exist". Detect the
+# drift and force a clean bootstrap recreate so the bucket comes back.
+echo
+echo "== Step 1b: verify templates bucket exists =="
+if aws s3api head-bucket --bucket "$BUCKET" --region "$REGION" 2>/dev/null; then
+  echo "  OK -> $BUCKET"
+else
+  echo "  bucket '$BUCKET' MISSING (drifted bootstrap). Recreating the bootstrap stack..."
+  aws cloudformation delete-stack --stack-name "$BOOTSTRAP_STACK" --region "$REGION"
+  aws cloudformation wait stack-delete-complete --stack-name "$BOOTSTRAP_STACK" --region "$REGION" 2>/dev/null || true
+  aws cloudformation deploy \
+    --template-file "$SCRIPT_DIR/00-bootstrap.yaml" \
+    --stack-name "$BOOTSTRAP_STACK" \
+    --parameter-overrides ProjectName="$PROJECT" \
+    --capabilities CAPABILITY_NAMED_IAM \
+    --region "$REGION"
+  aws s3api head-bucket --bucket "$BUCKET" --region "$REGION" 2>/dev/null \
+    || { echo "  ERROR: bucket still missing after bootstrap recreate. Aborting."; exit 1; }
+  echo "  bucket recreated -> $BUCKET"
+fi
+
 # --- 2. verify deployment.yaml points at this bucket -----------------------
 echo
 echo "== Step 2: verify TemplatesBaseUrl =="
