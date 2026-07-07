@@ -14,7 +14,6 @@ Description: >
     06 alb-ecs  → ALB + ECS Fargate + autoscaling (+ security groups, RDS ingress)
     07 pipeline → CodePipeline + CodeDeploy + EventBridge
 
-
 Parameters:
   ProjectName:
     Type: String

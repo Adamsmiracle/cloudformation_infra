@@ -220,6 +220,7 @@ Resources:
       SecurityGroupIds:
         - !Ref EndpointSecurityGroup
 
+
   S3GatewayEndpoint:
     Type: AWS::EC2::VPCEndpoint
     Properties:
