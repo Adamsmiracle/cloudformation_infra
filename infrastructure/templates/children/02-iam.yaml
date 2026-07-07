@@ -1,18 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
-  Child stack — all application IAM roles for the ECS CI/CD lab, consolidated
-  in one place (dedicated IAM layer). Created early so the compute and pipeline
-  stacks can consume the role ARNs as parameters.
-
-  NOTE: the infra-repo GitHub Actions role lives in 00-bootstrap.yaml instead —
-  it has a different lifecycle (must exist before this parent stack / GitSync).
-  Security groups stay co-located with the workload they protect; resource-based
-  policies (S3 bucket policies) stay with their buckets.
-
-  Every policy here scopes by deterministic, name-derived ARNs (built from
-  ProjectName) rather than cross-stack !GetAtt, so this stack has no dependency
-  on the registry/compute/pipeline stacks and can be created before them.
-
+  IAM roles for the photo-gallery app's ECS service, CodePipeline/CD, and GitHub Actions.
 
 Parameters:
   ProjectName:
