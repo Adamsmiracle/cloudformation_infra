@@ -18,6 +18,9 @@ Resources:
     UpdateReplacePolicy: Retain
     Properties:
       RepositoryName: !Sub "${ProjectName}-app"
+      # Let CloudFormation delete the repo even when it still holds images,
+      # so stack teardown doesn't fail on a non-empty repository.
+      EmptyOnDelete: true
       ImageTagMutability: MUTABLE
       ImageScanningConfiguration:
         ScanOnPush: true

@@ -87,7 +87,7 @@ Resources:
           FromPort: 443
           ToPort: 443
           CidrIp: 0.0.0.0/0
-          Description: HTTPS to S3 gateway endpoint (public IPs, private subnet has no IGW route)
+          Description: HTTPS to S3 gateway endpoint
         - IpProtocol: tcp
           FromPort: 5432
           ToPort: 5432
@@ -198,13 +198,6 @@ Resources:
         - Name: containerInsights
           Value: enabled
 
-  # Initial task definition needed to CREATE the service. With the CODE_DEPLOY
-  # controller, CloudFormation requires one at creation but ignores later changes
-  # to it — CodeDeploy registers/deploys real revisions (from the app repo's
-  # taskdef.json) thereafter. The image points at the PRIVATE ECR repo (pullable
-  # via the VPC endpoints, no NAT). The service is created with DesiredCount 0 so
-  # the stack completes without a running task; App Auto Scaling brings tasks up
-  # once the app image has been pushed to ECR.
   TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:

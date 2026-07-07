@@ -78,7 +78,6 @@ Resources:
             - GET
             - HEAD
           Compress: true
-          # Managed "CachingOptimized" policy
           CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
 
   # ---- Bucket policy: allow ONLY this distribution to read ----
