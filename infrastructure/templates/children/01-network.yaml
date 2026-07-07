@@ -185,8 +185,6 @@ Resources:
       RouteTableId: !Ref PublicRouteTable
       SubnetId: !Ref PublicSubnet2
 
-  # Single private route table shared by all private tiers (no NAT — egress to
-  # AWS services is via the interface/gateway VPC endpoints below).
   PrivateRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
