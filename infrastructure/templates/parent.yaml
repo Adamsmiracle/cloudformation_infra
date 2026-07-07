@@ -15,7 +15,6 @@ Description: >
     07 pipeline → CodePipeline + CodeDeploy + EventBridge
     08 cache    → ElastiCache Redis read cache
 
-
 Parameters:
   ProjectName:
     Type: String
