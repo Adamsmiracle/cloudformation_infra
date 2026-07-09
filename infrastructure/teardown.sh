@@ -3,8 +3,8 @@ set -uo pipefail
 
 REGION="${REGION:-${AWS_REGION:-eu-central-1}}"
 PROJECT="${PROJECT:-todo-app}"
-PARENT_STACK="${PARENT_STACK:-todo-app}"
-PREREQ_STACK="${PREREQ_STACK:-todo-app-prereqs}"
+PARENT_STACK="${PARENT_STACK:-todo}"
+PREREQ_STACK="${PREREQ_STACK:-prereq}"
 
 ACCOUNT="$(aws sts get-caller-identity --query Account --output text 2>/dev/null)" || {
   echo "ERROR: cannot resolve AWS identity"; exit 1; }

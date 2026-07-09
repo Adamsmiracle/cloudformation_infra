@@ -51,11 +51,11 @@
           <mxGeometry x="40" y="330" width="1780" height="110" as="geometry" />
         </mxCell>
 
-        <mxCell id="gh_repo_prereq" value="GitHub&#10;Prereq Repo&#10;(todo-app-prereqs)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=9;" vertex="1" parent="1">
+        <mxCell id="gh_repo_prereq" value="GitHub&#10;Prereq Repo" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=9;" vertex="1" parent="1">
           <mxGeometry x="60" y="365" width="110" height="55" as="geometry" />
         </mxCell>
 
-        <mxCell id="cfn_prereq" value="CloudFormation&#10;todo-app-prereqs&#10;(GitSync, flat)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#E7157B;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=9;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.cloudformation;" vertex="1" parent="1">
+        <mxCell id="cfn_prereq" value="CloudFormation&#10;prereq stack&#10;(GitSync, flat)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#E7157B;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=9;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.cloudformation;" vertex="1" parent="1">
           <mxGeometry x="215" y="355" width="44" height="44" as="geometry" />
         </mxCell>
 

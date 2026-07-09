@@ -16,7 +16,7 @@ race between the pipelines and the infrastructure they depend on.
 prerequisites GitHub repo (separate repo)
     │
     └── on push → GitSync (flat template, no bucket needed)
-            └── creates todo-app-prereqs stack
+            └── creates the prereq stack
                     ├── S3 templates bucket
                     ├── ECR repository (todo-app-app)
                     ├── infra GHA OIDC role   (branch todo only)
@@ -68,7 +68,7 @@ before either CI workflow can run).
 ## Prerequisites stack (separate repo, deploy FIRST)
 
 Connect the prerequisites repo to CloudFormation GitSync (stack name
-`todo-app-prereqs`, deployment file `deployment.yaml`). Then grab its outputs:
+`prereq`, deployment file `deployment.yaml`). Then grab its outputs:
 
 - `TemplatesBucketUrl` — paste into this repo's `deployment.yaml` as `TemplatesBaseUrl`
 - `TemplatesBucketName` — set as the `TODO_TEMPLATES_BUCKET` secret in this repo
