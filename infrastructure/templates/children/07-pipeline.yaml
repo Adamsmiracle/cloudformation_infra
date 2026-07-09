@@ -2,7 +2,9 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: Child stack — S3 → CodePipeline → CodeDeploy (ECS blue/green)
 
 # IAM roles (CodeDeploy, CodePipeline, EventBridge) live in the IAM stack
-# (02-iam.yaml) and arrive here as ARNs. Bucket policies stay with their bucket.
+# (03-iam.yaml) and arrive here as ARNs. Bucket policies stay with their bucket.
+# The ECR repository itself lives in the prerequisites repo/stack; only its
+# name is needed here (source action + EventBridge pattern).
 #
 # Deploy files (taskdef.json + appspec.yaml) are published to DeploySourceBucket
 # by the app repo's GitHub Actions workflow and read by the S3 source action —

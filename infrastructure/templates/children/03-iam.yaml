@@ -4,64 +4,23 @@ Description: >
   in one place (dedicated IAM layer). Created early so the compute and pipeline
   stacks can consume the role ARNs as parameters.
 
-  NOTE: the infra-repo GitHub Actions role lives in 00-bootstrap.yaml instead —
-  it has a different lifecycle (must exist before this parent stack / GitSync).
-  Security groups stay co-located with the workload they protect; resource-based
-  policies (S3 bucket policies) stay with their buckets.
+  NOTE: the GitHub Actions OIDC roles (infra template-upload + app ECR-push)
+  live in the separate prerequisites repo — they have a different lifecycle
+  (must exist before this parent stack / the CI workflows that use them).
+  Security groups all live in the security stack (02-security.yaml);
+  resource-based policies (S3 bucket policies) stay with their buckets.
 
   Every policy here scopes by deterministic, name-derived ARNs (built from
   ProjectName) rather than cross-stack !GetAtt, so this stack has no dependency
-  on the registry/compute/pipeline stacks and can be created before them.
+  on the compute/pipeline stacks and can be created before them.
 
 Parameters:
   ProjectName:
-    Type: String
-  GitHubOrg:
-    Type: String
-  AppRepoName:
     Type: String
   TemplateVersion:
     Type: String
 
 Resources:
-  GitHubActionsEcrPushRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Sub "${ProjectName}-github-actions-ecr-push-role"
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Federated: !Sub "arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com"
-            Action: sts:AssumeRoleWithWebIdentity
-            Condition:
-              StringEquals:
-                token.actions.githubusercontent.com:aud: sts.amazonaws.com
-              StringLike:
-                token.actions.githubusercontent.com:sub: !Sub "repo:${GitHubOrg}/${AppRepoName}:*"
-      Policies:
-        - PolicyName: EcrPushPolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action: ecr:GetAuthorizationToken
-                Resource: '*'
-              - Effect: Allow
-                Action:
-                  - ecr:BatchCheckLayerAvailability
-                  - ecr:CompleteLayerUpload
-                  - ecr:InitiateLayerUpload
-                  - ecr:PutImage
-                  - ecr:UploadLayerPart
-                Resource: !Sub "arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${ProjectName}-app"
-              - Effect: Allow
-                Action:
-                  - s3:PutObject
-                  - s3:GetObject
-                Resource: !Sub "arn:aws:s3:::${ProjectName}-deploy-source-${AWS::AccountId}-${AWS::Region}/*"
-
   # ---------------------------------------------------------------------------
   # ECS task roles
   # ---------------------------------------------------------------------------
@@ -239,8 +198,6 @@ Resources:
                 Resource: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${ProjectName}-pipeline"
 
 Outputs:
-  GitHubActionsEcrPushRoleArn:
-    Value: !GetAtt GitHubActionsEcrPushRole.Arn
   TaskExecutionRoleArn:
     Value: !GetAtt TaskExecutionRole.Arn
   TaskRoleArn:

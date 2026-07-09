@@ -1,11 +1,8 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: Child stack — ALB + ECS Fargate (blue/green ready) + CPU autoscaling
 
-# Security groups stay co-located with the workload they protect. This stack
-# owns the ECS service SG, so it also defines the ingress rules on the RDS Proxy
-# SG and the Redis SG (proxy/cache SGs <- service SG). Defining them here avoids
-# a cross-stack security-group dependency cycle (the data/cache stacks would
-# otherwise need the service SG, which is created here).
+# Security groups are owned by the security stack (02-security.yaml) and
+# arrive here as parameters — this stack creates no SGs and no SG rules.
 #
 # ECS tasks talk to the database ONLY through the RDS Proxy (5432) and to the
 # read cache through Redis (6379) — never to RDS directly.
@@ -17,8 +14,6 @@ Parameters:
   ProjectName:
     Type: String
   VpcId:
-    Type: String
-  VpcCidr:
     Type: String
   PublicSubnet1:
     Type: String
@@ -46,96 +41,15 @@ Parameters:
     Type: String
   TaskRoleArn:
     Type: String
-  ProxySecurityGroupId:
+  AlbSecurityGroupId:
     Type: String
-  CacheSecurityGroupId:
+  ServiceSecurityGroupId:
     Type: String
   TemplateVersion:
     Type: String
 
 
 Resources:
-  # ---- Security groups ----
-  AlbSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: ALB - open HTTP from internet
-      VpcId: !Ref VpcId
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          CidrIp: 0.0.0.0/0
-          Description: HTTP
-      SecurityGroupEgress:
-        - IpProtocol: tcp
-          FromPort: !Ref ContainerPort
-          ToPort: !Ref ContainerPort
-          CidrIp: !Ref VpcCidr
-          Description: To tasks
-      Tags:
-        - Key: Name
-          Value: !Sub "${ProjectName}-alb-sg"
-
-  ServiceSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: ECS tasks - only ALB may talk to them
-      VpcId: !Ref VpcId
-      SecurityGroupEgress:
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          CidrIp: !Ref VpcCidr
-          Description: HTTPS to interface VPC endpoints
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          CidrIp: 0.0.0.0/0
-          Description: HTTPS to S3 gateway endpoint (public IPs, private subnet has no IGW route)
-        - IpProtocol: tcp
-          FromPort: 5432
-          ToPort: 5432
-          DestinationSecurityGroupId: !Ref ProxySecurityGroupId
-          Description: PostgreSQL to RDS Proxy
-        - IpProtocol: tcp
-          FromPort: 6379
-          ToPort: 6379
-          DestinationSecurityGroupId: !Ref CacheSecurityGroupId
-          Description: Redis to ElastiCache
-      Tags:
-        - Key: Name
-          Value: !Sub "${ProjectName}-svc-sg"
-
-  ServiceIngressFromAlb:
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      GroupId: !Ref ServiceSecurityGroup
-      IpProtocol: tcp
-      FromPort: !Ref ContainerPort
-      ToPort: !Ref ContainerPort
-      SourceSecurityGroupId: !Ref AlbSecurityGroup
-
-  ProxyIngressFromService:
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      GroupId: !Ref ProxySecurityGroupId
-      IpProtocol: tcp
-      FromPort: 5432
-      ToPort: 5432
-      SourceSecurityGroupId: !Ref ServiceSecurityGroup
-      Description: PostgreSQL from ECS tasks
-
-  CacheIngressFromService:
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      GroupId: !Ref CacheSecurityGroupId
-      IpProtocol: tcp
-      FromPort: 6379
-      ToPort: 6379
-      SourceSecurityGroupId: !Ref ServiceSecurityGroup
-      Description: Redis from ECS tasks
-
   # ---- ALB ----
   LoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
@@ -144,7 +58,7 @@ Resources:
       Scheme: internet-facing
       Type: application
       SecurityGroups:
-        - !Ref AlbSecurityGroup
+        - !Ref AlbSecurityGroupId
       Subnets:
         - !Ref PublicSubnet1
         - !Ref PublicSubnet2
@@ -276,7 +190,7 @@ Resources:
             - !Ref AppSubnet1
             - !Ref AppSubnet2
           SecurityGroups:
-            - !Ref ServiceSecurityGroup
+            - !Ref ServiceSecurityGroupId
       LoadBalancers:
         - ContainerName: app
           ContainerPort: !Ref ContainerPort

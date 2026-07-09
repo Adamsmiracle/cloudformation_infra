@@ -2,9 +2,9 @@
 set -uo pipefail
 
 REGION="${REGION:-${AWS_REGION:-eu-central-1}}"
-PROJECT="${PROJECT:-todo}"
-PARENT_STACK="${PARENT_STACK:-todo}"
-BOOTSTRAP_STACK="${BOOTSTRAP_STACK:-00-bootstrap}"
+PROJECT="${PROJECT:-todo-app}"
+PARENT_STACK="${PARENT_STACK:-todo-app}"
+PREREQ_STACK="${PREREQ_STACK:-todo-app-prereqs}"
 
 ACCOUNT="$(aws sts get-caller-identity --query Account --output text 2>/dev/null)" || {
   echo "ERROR: cannot resolve AWS identity"; exit 1; }
@@ -107,7 +107,7 @@ echo
 echo "== Step 2: Delete CloudFormation stacks =="
 
 delete_stack "$PARENT_STACK"
-delete_stack "$BOOTSTRAP_STACK"
+delete_stack "$PREREQ_STACK"
 
 # -------------------------------
 # IMPORTANT NOTE (Git Sync)
@@ -120,6 +120,8 @@ echo "IMPORTANT:"
 echo "- Git Sync configuration is intentionally NOT deleted."
 echo "- It is a persistent deployment trigger tied to your repo + branch."
 echo "- This allows safe teardown/recreate cycles without 409 conflicts."
+echo "- The prerequisites stack ('$PREREQ_STACK') is GitSync-managed from the"
+echo "  prerequisites repo — a push there recreates it before the main infra."
 echo
 
 # -------------------------------

@@ -5,7 +5,8 @@
 #   Usage:  ./recreate.sh            (run from anywhere; resolves its own paths)
 #
 #   Steps:
-#     1. Deploy the bootstrap stack        -> templates S3 bucket + infra OIDC role
+#     1. Verify the PREREQUISITES stack exists (separate repo, GitSync-deployed:
+#        templates bucket + ECR + GitHub OIDC roles) and its bucket is present
 #     2. Verify deployment.yaml's TemplatesBaseUrl matches that bucket
 #     3. Full-sync templates/ to the bucket  (so GitSync can instantiate the
 #        nested stacks — avoids the upload/deploy race)
@@ -18,15 +19,15 @@
 #   so the one-time console link in step 4 is unavoidable on a fresh recreate.
 #   The connection persists across teardowns, so re-linking is rarely needed.
 #
-#   Override via env vars if names differ: REGION PROJECT PARENT_STACK BOOTSTRAP_STACK BRANCH
+#   Override via env vars if names differ: REGION PROJECT PARENT_STACK PREREQ_STACK BRANCH
 # =============================================================================
 set -uo pipefail
 
 REGION="${REGION:-${AWS_REGION:-eu-central-1}}"
-PROJECT="${PROJECT:-todo}"
-PARENT_STACK="${PARENT_STACK:-todo}"
-BOOTSTRAP_STACK="${BOOTSTRAP_STACK:-todo-bootstrap}"
-BRANCH="${BRANCH:-photo_upload}"
+PROJECT="${PROJECT:-todo-app}"
+PARENT_STACK="${PARENT_STACK:-todo-app}"
+PREREQ_STACK="${PREREQ_STACK:-todo-app-prereqs}"
+BRANCH="${BRANCH:-todo}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # infrastructure/
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"                    # infra repo root
@@ -43,38 +44,41 @@ echo "Project : $PROJECT  (parent stack: $PARENT_STACK, branch: $BRANCH)"
 echo "Bucket  : $BUCKET"
 echo
 
-# --- 1. bootstrap ----------------------------------------------------------
-echo "== Step 1: deploy bootstrap stack =="
-aws cloudformation deploy \
-  --template-file "$SCRIPT_DIR/00-bootstrap.yaml" \
-  --stack-name "$BOOTSTRAP_STACK" \
-  --parameter-overrides ProjectName="$PROJECT" \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --region "$REGION" || { echo "  bootstrap deploy reported no-op or error (continuing)"; }
+# --- 1. prerequisites ------------------------------------------------------
+# The prerequisites stack (templates bucket + ECR + GitHub OIDC roles) lives in
+# its OWN repo and is deployed by GitSync — this script does not create it.
+echo "== Step 1: verify prerequisites stack =="
+if aws cloudformation describe-stacks --stack-name "$PREREQ_STACK" --region "$REGION" >/dev/null 2>&1; then
+  echo "  OK -> $PREREQ_STACK"
+else
+  cat <<EOF
+  ERROR: prerequisites stack '$PREREQ_STACK' not found.
+  Deploy it first from the prerequisites repo via GitSync:
+
+    CloudFormation console -> Create stack -> "Sync from Git"
+      Stack name      : $PREREQ_STACK
+      Repository      : the prerequisites repo
+      Branch          : $BRANCH
+      Deployment file : deployment.yaml
+
+  Then re-run this script.
+EOF
+  exit 1
+fi
 
 # --- 1b. guarantee the templates bucket actually exists --------------------
-# A partial teardown can leave the bootstrap stack PRESENT but its (retained)
-# bucket deleted. In that drifted state the 'deploy' above is a no-op and does
-# NOT recreate the bucket, so the sync in step 3 would fail with NoSuchBucket
-# and every nested stack would fail with "bucket does not exist". Detect the
-# drift and force a clean bootstrap recreate so the bucket comes back.
+# A partial teardown can leave the prereq stack PRESENT but its (retained)
+# bucket deleted. In that drifted state the sync in step 3 would fail with
+# NoSuchBucket and every nested stack would fail with "bucket does not exist".
 echo
 echo "== Step 1b: verify templates bucket exists =="
 if aws s3api head-bucket --bucket "$BUCKET" --region "$REGION" 2>/dev/null; then
   echo "  OK -> $BUCKET"
 else
-  echo "  bucket '$BUCKET' MISSING (drifted bootstrap). Recreating the bootstrap stack..."
-  aws cloudformation delete-stack --stack-name "$BOOTSTRAP_STACK" --region "$REGION"
-  aws cloudformation wait stack-delete-complete --stack-name "$BOOTSTRAP_STACK" --region "$REGION" 2>/dev/null || true
-  aws cloudformation deploy \
-    --template-file "$SCRIPT_DIR/00-bootstrap.yaml" \
-    --stack-name "$BOOTSTRAP_STACK" \
-    --parameter-overrides ProjectName="$PROJECT" \
-    --capabilities CAPABILITY_NAMED_IAM \
-    --region "$REGION"
-  aws s3api head-bucket --bucket "$BUCKET" --region "$REGION" 2>/dev/null \
-    || { echo "  ERROR: bucket still missing after bootstrap recreate. Aborting."; exit 1; }
-  echo "  bucket recreated -> $BUCKET"
+  echo "  ERROR: bucket '$BUCKET' MISSING (drifted prerequisites stack)."
+  echo "  Recreate it from the prerequisites repo (delete the '$PREREQ_STACK' stack,"
+  echo "  then push to the prereq repo so GitSync redeploys it), then re-run."
+  exit 1
 fi
 
 # --- 2. verify deployment.yaml points at this bucket -----------------------

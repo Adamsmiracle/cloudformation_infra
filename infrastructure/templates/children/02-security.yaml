@@ -1,0 +1,213 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Child stack — ALL security groups for the To-Do app, in one place.
+  Owning every group and every rule in a single template makes the traffic
+  matrix reviewable at a glance and removes the cross-stack rule juggling the
+  workload stacks previously needed to break security-group dependency cycles.
+
+  Traffic matrix (least privilege, hop by hop):
+    internet :80  -> ALB
+    ALB       :8080 (ContainerPort) -> ECS tasks
+    ECS tasks :5432 -> RDS Proxy
+    RDS Proxy :5432 -> RDS PostgreSQL
+    ECS tasks :6379 -> ElastiCache Redis
+    ECS tasks :443  -> VPC interface endpoints + S3 gateway endpoint
+
+  Rules that reference two groups (e.g. ALB -> tasks) are standalone
+  Ingress/Egress resources so the two groups don't reference each other
+  circularly inside their own definitions.
+
+Parameters:
+  ProjectName:
+    Type: String
+  VpcId:
+    Type: String
+  VpcCidr:
+    Type: String
+  ContainerPort:
+    Type: Number
+    Default: 8080
+  TemplateVersion:
+    Type: String
+
+Resources:
+  # ---------------------------------------------------------------------------
+  # Edge: ALB
+  # ---------------------------------------------------------------------------
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub "${ProjectName} ALB - open HTTP from internet"
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-alb-sg"
+
+  # ---------------------------------------------------------------------------
+  # App tier: ECS tasks
+  # ---------------------------------------------------------------------------
+  ServiceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub "${ProjectName} ECS tasks - only ALB may talk to them"
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref VpcCidr
+          Description: HTTPS to interface VPC endpoints
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS to S3 gateway endpoint (public IPs, private subnet has no IGW route)
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-svc-sg"
+
+  # ---------------------------------------------------------------------------
+  # Data tier: RDS Proxy + RDS
+  # ---------------------------------------------------------------------------
+  ProxySecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub "${ProjectName} RDS Proxy - ingress from ECS, egress to RDS"
+      VpcId: !Ref VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-proxy-sg"
+
+  DbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub "${ProjectName} RDS - ingress from RDS Proxy only"
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 127.0.0.1/32
+          Description: No egress (RDS does not initiate connections)
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-db-sg"
+
+  # ---------------------------------------------------------------------------
+  # Cache tier: ElastiCache Redis
+  # ---------------------------------------------------------------------------
+  CacheSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub "${ProjectName} Redis - ingress from ECS tasks only"
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 127.0.0.1/32
+          Description: No egress (cache does not initiate connections)
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-redis-sg"
+
+  # ---------------------------------------------------------------------------
+  # Cross-group rules
+  # ---------------------------------------------------------------------------
+  # ALB <-> ECS tasks
+  AlbEgressToService:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref AlbSecurityGroup
+      IpProtocol: tcp
+      FromPort: !Ref ContainerPort
+      ToPort: !Ref ContainerPort
+      DestinationSecurityGroupId: !Ref ServiceSecurityGroup
+      Description: To ECS tasks
+
+  ServiceIngressFromAlb:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ServiceSecurityGroup
+      IpProtocol: tcp
+      FromPort: !Ref ContainerPort
+      ToPort: !Ref ContainerPort
+      SourceSecurityGroupId: !Ref AlbSecurityGroup
+      Description: App traffic from ALB
+
+  # ECS tasks <-> RDS Proxy
+  ServiceEgressToProxy:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ServiceSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      DestinationSecurityGroupId: !Ref ProxySecurityGroup
+      Description: PostgreSQL to RDS Proxy
+
+  ProxyIngressFromService:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ProxySecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref ServiceSecurityGroup
+      Description: PostgreSQL from ECS tasks
+
+  # RDS Proxy <-> RDS
+  ProxyEgressToDb:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ProxySecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      DestinationSecurityGroupId: !Ref DbSecurityGroup
+      Description: PostgreSQL to RDS
+
+  DbIngressFromProxy:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref DbSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref ProxySecurityGroup
+      Description: PostgreSQL from RDS Proxy
+
+  # ECS tasks <-> Redis
+  ServiceEgressToCache:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ServiceSecurityGroup
+      IpProtocol: tcp
+      FromPort: 6379
+      ToPort: 6379
+      DestinationSecurityGroupId: !Ref CacheSecurityGroup
+      Description: Redis to ElastiCache
+
+  CacheIngressFromService:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref CacheSecurityGroup
+      IpProtocol: tcp
+      FromPort: 6379
+      ToPort: 6379
+      SourceSecurityGroupId: !Ref ServiceSecurityGroup
+      Description: Redis from ECS tasks
+
+Outputs:
+  AlbSecurityGroupId:
+    Value: !Ref AlbSecurityGroup
+  ServiceSecurityGroupId:
+    Value: !Ref ServiceSecurityGroup
+  ProxySecurityGroupId:
+    Value: !Ref ProxySecurityGroup
+  DbSecurityGroupId:
+    Value: !Ref DbSecurityGroup
+  CacheSecurityGroupId:
+    Value: !Ref CacheSecurityGroup

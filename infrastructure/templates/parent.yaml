@@ -1,19 +1,16 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
   Parent stack for the To-Do app lab (ECS Fargate + RDS via RDS Proxy +
-  ElastiCache Redis). Deployed by CloudFormation GitSync. Instantiates nested
-  stacks whose templates live in S3 (uploaded by GitHub Actions in this repo).
-  Parent passes parameters down; children return outputs that other children
-  consume via !GetAtt …Outputs.X.
+  ElastiCache Redis). Deployed by CloudFormation GitSync; children live in S3
+  (uploaded by GitHub Actions in this repo) and exchange values via
+  !GetAtt …Outputs.X. The templates bucket, ECR repo, and GitHub OIDC roles
+  live in the separate prerequisites stack, GitSync-deployed BEFORE this one.
 
-  Layers (industry-standard, by lifecycle):
-    01 network  → multi-AZ VPC, dedicated subnets per tier, endpoints
-    02 iam      → all application IAM roles
-    04 database → RDS PostgreSQL (Multi-AZ) + RDS Proxy + Secrets Manager
-    05 ecr      → image registry
-    06 alb-ecs  → ALB + ECS Fargate + autoscaling (+ security groups)
-    07 pipeline → CodePipeline + CodeDeploy + EventBridge
-    08 cache    → ElastiCache Redis read cache
+  Layers: 01 network (VPC, per-tier subnets, endpoints), 02 security (ALL
+  security groups + rules), 03 iam (application roles), 04 database
+  (RDS Multi-AZ + RDS Proxy + Secrets Manager), 05 cache (Redis),
+  06 alb-ecs (ALB + Fargate + autoscaling), 07 pipeline
+  (CodePipeline + CodeDeploy + EventBridge).
 
 Parameters:
   ProjectName:
@@ -51,14 +48,6 @@ Parameters:
   CacheSubnet2Cidr:
     Type: String
     Default: 10.30.31.0/24
-
-  # ---- GitHub / OIDC (for the APP-repo workflow's ECR-push + deploy-bundle role) ----
-  GitHubOrg:
-    Type: String
-    Default: Adamsmiracle
-  AppRepoName:
-    Type: String
-    Default: aws_lab_applications
 
   # ---- Database ----
   DBInstanceClass:
@@ -138,18 +127,36 @@ Resources:
           Value: network
 
   # -------------------------------------------------------------------------
-  # Child 2 — IAM (all application IAM roles)
+  # Child 2 — Security groups (the whole traffic matrix, one file)
+  # -------------------------------------------------------------------------
+  SecurityStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "${TemplatesBaseUrl}/children/02-security.yaml"
+      TimeoutInMinutes: 10
+      Parameters:
+        ProjectName:     !Ref ProjectName
+        VpcId:           !GetAtt NetworkStack.Outputs.VpcId
+        VpcCidr:         !GetAtt NetworkStack.Outputs.VpcCidr
+        ContainerPort:   !Ref ContainerPort
+        TemplateVersion: !Ref TemplateVersion
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Layer
+          Value: security
+
+  # -------------------------------------------------------------------------
+  # Child 3 — IAM (all application IAM roles)
   # -------------------------------------------------------------------------
   IamStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: !Sub "${TemplatesBaseUrl}/children/02-iam.yaml"
+      TemplateURL: !Sub "${TemplatesBaseUrl}/children/03-iam.yaml"
       TimeoutInMinutes: 10
       Parameters:
-        ProjectName:         !Ref ProjectName
-        GitHubOrg:           !Ref GitHubOrg
-        AppRepoName:         !Ref AppRepoName
-        TemplateVersion:     !Ref TemplateVersion
+        ProjectName:     !Ref ProjectName
+        TemplateVersion: !Ref TemplateVersion
       Tags:
         - Key: Project
           Value: !Ref ProjectName
@@ -165,15 +172,16 @@ Resources:
       TemplateURL: !Sub "${TemplatesBaseUrl}/children/04-database.yaml"
       TimeoutInMinutes: 40
       Parameters:
-        ProjectName:     !Ref ProjectName
-        VpcId:           !GetAtt NetworkStack.Outputs.VpcId
-        DataSubnet1:     !GetAtt NetworkStack.Outputs.DataSubnet1
-        DataSubnet2:     !GetAtt NetworkStack.Outputs.DataSubnet2
-        DBInstanceClass: !Ref DBInstanceClass
-        DBName:          !Ref DBName
-        DBUsername:      !Ref DBUsername
-        MultiAZ:         !Ref DBMultiAZ
-        TemplateVersion: !Ref TemplateVersion
+        ProjectName:          !Ref ProjectName
+        DbSecurityGroupId:    !GetAtt SecurityStack.Outputs.DbSecurityGroupId
+        ProxySecurityGroupId: !GetAtt SecurityStack.Outputs.ProxySecurityGroupId
+        DataSubnet1:          !GetAtt NetworkStack.Outputs.DataSubnet1
+        DataSubnet2:          !GetAtt NetworkStack.Outputs.DataSubnet2
+        DBInstanceClass:      !Ref DBInstanceClass
+        DBName:               !Ref DBName
+        DBUsername:           !Ref DBUsername
+        MultiAZ:              !Ref DBMultiAZ
+        TemplateVersion:      !Ref TemplateVersion
       Tags:
         - Key: Project
           Value: !Ref ProjectName
@@ -181,21 +189,25 @@ Resources:
           Value: database
 
   # -------------------------------------------------------------------------
-  # Child 5 — ECR registry
+  # Child 5 — ElastiCache Redis read cache
   # -------------------------------------------------------------------------
-  EcrStack:
+  CacheStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: !Sub "${TemplatesBaseUrl}/children/05-ecr.yaml"
-      TimeoutInMinutes: 10
+      TemplateURL: !Sub "${TemplatesBaseUrl}/children/05-cache.yaml"
+      TimeoutInMinutes: 30
       Parameters:
-        ProjectName:     !Ref ProjectName
-        TemplateVersion: !Ref TemplateVersion
+        ProjectName:          !Ref ProjectName
+        CacheSecurityGroupId: !GetAtt SecurityStack.Outputs.CacheSecurityGroupId
+        CacheSubnet1:         !GetAtt NetworkStack.Outputs.CacheSubnet1
+        CacheSubnet2:         !GetAtt NetworkStack.Outputs.CacheSubnet2
+        CacheNodeType:        !Ref CacheNodeType
+        TemplateVersion:      !Ref TemplateVersion
       Tags:
         - Key: Project
           Value: !Ref ProjectName
         - Key: Layer
-          Value: registry
+          Value: cache
 
   # -------------------------------------------------------------------------
   # Child 6 — ALB + ECS Fargate + autoscaling
@@ -206,25 +218,24 @@ Resources:
       TemplateURL: !Sub "${TemplatesBaseUrl}/children/06-alb-ecs.yaml"
       TimeoutInMinutes: 20
       Parameters:
-        ProjectName:           !Ref ProjectName
-        VpcId:                 !GetAtt NetworkStack.Outputs.VpcId
-        VpcCidr:               !GetAtt NetworkStack.Outputs.VpcCidr
-        PublicSubnet1:         !GetAtt NetworkStack.Outputs.PublicSubnet1
-        PublicSubnet2:         !GetAtt NetworkStack.Outputs.PublicSubnet2
-        AppSubnet1:            !GetAtt NetworkStack.Outputs.AppSubnet1
-        AppSubnet2:            !GetAtt NetworkStack.Outputs.AppSubnet2
-        ContainerPort:         !Ref ContainerPort
-        DesiredCount:          !Ref DesiredCount
-        MinCapacity:           !Ref MinCapacity
-        MaxCapacity:           !Ref MaxCapacity
-        CpuTargetUtilization:  !Ref CpuTargetUtilization
-        ContainerCpu:          !Ref ContainerCpu
-        ContainerMemory:       !Ref ContainerMemory
-        TaskExecutionRoleArn:  !GetAtt IamStack.Outputs.TaskExecutionRoleArn
-        TaskRoleArn:           !GetAtt IamStack.Outputs.TaskRoleArn
-        ProxySecurityGroupId:  !GetAtt DatabaseStack.Outputs.ProxySecurityGroupId
-        CacheSecurityGroupId:  !GetAtt CacheStack.Outputs.CacheSecurityGroupId
-        TemplateVersion:       !Ref TemplateVersion
+        ProjectName:            !Ref ProjectName
+        VpcId:                  !GetAtt NetworkStack.Outputs.VpcId
+        PublicSubnet1:          !GetAtt NetworkStack.Outputs.PublicSubnet1
+        PublicSubnet2:          !GetAtt NetworkStack.Outputs.PublicSubnet2
+        AppSubnet1:             !GetAtt NetworkStack.Outputs.AppSubnet1
+        AppSubnet2:             !GetAtt NetworkStack.Outputs.AppSubnet2
+        ContainerPort:          !Ref ContainerPort
+        DesiredCount:           !Ref DesiredCount
+        MinCapacity:            !Ref MinCapacity
+        MaxCapacity:            !Ref MaxCapacity
+        CpuTargetUtilization:   !Ref CpuTargetUtilization
+        ContainerCpu:           !Ref ContainerCpu
+        ContainerMemory:        !Ref ContainerMemory
+        TaskExecutionRoleArn:   !GetAtt IamStack.Outputs.TaskExecutionRoleArn
+        TaskRoleArn:            !GetAtt IamStack.Outputs.TaskRoleArn
+        AlbSecurityGroupId:     !GetAtt SecurityStack.Outputs.AlbSecurityGroupId
+        ServiceSecurityGroupId: !GetAtt SecurityStack.Outputs.ServiceSecurityGroupId
+        TemplateVersion:        !Ref TemplateVersion
       Tags:
         - Key: Project
           Value: !Ref ProjectName
@@ -233,6 +244,8 @@ Resources:
 
   # -------------------------------------------------------------------------
   # Child 7 — CI/CD pipeline (ECR push → EventBridge → CodePipeline → CodeDeploy)
+  # The ECR repository itself lives in the prerequisites stack; its name is
+  # deterministic (${ProjectName}-app), so we pass the name, not a !GetAtt.
   # -------------------------------------------------------------------------
   PipelineStack:
     Type: AWS::CloudFormation::Stack
@@ -246,7 +259,7 @@ Resources:
         TargetGroupBlueName:  !GetAtt AlbEcsStack.Outputs.TargetGroupBlueName
         TargetGroupGreenName: !GetAtt AlbEcsStack.Outputs.TargetGroupGreenName
         HttpListenerArn:      !GetAtt AlbEcsStack.Outputs.HttpListenerArn
-        EcrRepositoryName:    !GetAtt EcrStack.Outputs.EcrRepositoryName
+        EcrRepositoryName:    !Sub "${ProjectName}-app"
         CodeDeployRoleArn:    !GetAtt IamStack.Outputs.CodeDeployRoleArn
         CodePipelineRoleArn:  !GetAtt IamStack.Outputs.CodePipelineRoleArn
         EventBridgeRoleArn:   !GetAtt IamStack.Outputs.EventBridgePipelineRoleArn
@@ -256,27 +269,6 @@ Resources:
           Value: !Ref ProjectName
         - Key: Layer
           Value: cicd
-
-  # -------------------------------------------------------------------------
-  # Child 8 — ElastiCache Redis read cache
-  # -------------------------------------------------------------------------
-  CacheStack:
-    Type: AWS::CloudFormation::Stack
-    Properties:
-      TemplateURL: !Sub "${TemplatesBaseUrl}/children/08-cache.yaml"
-      TimeoutInMinutes: 30
-      Parameters:
-        ProjectName:     !Ref ProjectName
-        VpcId:           !GetAtt NetworkStack.Outputs.VpcId
-        CacheSubnet1:    !GetAtt NetworkStack.Outputs.CacheSubnet1
-        CacheSubnet2:    !GetAtt NetworkStack.Outputs.CacheSubnet2
-        CacheNodeType:   !Ref CacheNodeType
-        TemplateVersion: !Ref TemplateVersion
-      Tags:
-        - Key: Project
-          Value: !Ref ProjectName
-        - Key: Layer
-          Value: cache
 
 Outputs:
   AlbDns:
@@ -291,11 +283,6 @@ Outputs:
   RedisEndpoint:
     Description: ElastiCache Redis primary endpoint (private)
     Value: !GetAtt CacheStack.Outputs.RedisPrimaryEndpoint
-  EcrRepositoryUri:
-    Value: !GetAtt EcrStack.Outputs.EcrRepositoryUri
-  GitHubActionsRoleArn:
-    Description: For the APP repo workflow (ECR push + deploy bundle)
-    Value: !GetAtt IamStack.Outputs.GitHubActionsEcrPushRoleArn
   DeploySourceBucket:
     Description: Where the app workflow uploads deploy-bundle.zip (taskdef.json + appspec.yaml)
     Value: !GetAtt PipelineStack.Outputs.DeploySourceBucket

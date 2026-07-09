@@ -2,13 +2,14 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: >
   Child stack — Amazon ElastiCache (Redis) for the To-Do app read cache.
   Nodes run in the dedicated cache-tier private subnets and accept traffic
-  only from the ECS service (ingress rule added by the compute stack to avoid
-  a cross-stack security-group cycle). The app reads the endpoint from SSM.
+  only from the ECS service. The cache security group is owned by the security
+  stack (02-security.yaml) and arrives as a parameter. The app reads the
+  endpoint from SSM.
 
 Parameters:
   ProjectName:
     Type: String
-  VpcId:
+  CacheSecurityGroupId:
     Type: String
   CacheSubnet1:
     Type: String
@@ -31,19 +32,6 @@ Resources:
         - !Ref CacheSubnet1
         - !Ref CacheSubnet2
 
-  CacheSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: !Sub "${ProjectName} Redis - ingress from ECS tasks only"
-      VpcId: !Ref VpcId
-      SecurityGroupEgress:
-        - IpProtocol: "-1"
-          CidrIp: 127.0.0.1/32
-          Description: No egress (cache does not initiate connections)
-      Tags:
-        - Key: Name
-          Value: !Sub "${ProjectName}-redis-sg"
-
   RedisReplicationGroup:
     Type: AWS::ElastiCache::ReplicationGroup
     Properties:
@@ -57,7 +45,7 @@ Resources:
       MultiAZEnabled: false
       CacheSubnetGroupName: !Ref CacheSubnetGroup
       SecurityGroupIds:
-        - !Ref CacheSecurityGroup
+        - !Ref CacheSecurityGroupId
       Port: 6379
       AtRestEncryptionEnabled: true
       TransitEncryptionEnabled: false
@@ -81,8 +69,6 @@ Resources:
       Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Port
 
 Outputs:
-  CacheSecurityGroupId:
-    Value: !Ref CacheSecurityGroup
   RedisPrimaryEndpoint:
     Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Address
   RedisPort:

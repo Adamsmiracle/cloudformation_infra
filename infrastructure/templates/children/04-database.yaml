@@ -5,11 +5,15 @@ Description: >
   RDS Proxy endpoint (connection pooling / failover smoothing), never to the DB
   directly. Master credentials are generated and rotated by Secrets Manager
   (ManageMasterUserPassword); the proxy and the app read that secret.
+  Security groups are owned by the security stack (02-security.yaml) and
+  arrive here as parameters.
 
 Parameters:
   ProjectName:
     Type: String
-  VpcId:
+  DbSecurityGroupId:
+    Type: String
+  ProxySecurityGroupId:
     Type: String
   DataSubnet1:
     Type: String
@@ -46,52 +50,6 @@ Resources:
         - Key: Name
           Value: !Sub "${ProjectName}-db-subnets"
 
-  # ---- Security groups ----
-  # DB accepts traffic only from the RDS Proxy (least privilege).
-  DbSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: !Sub "${ProjectName} RDS - ingress from RDS Proxy only"
-      VpcId: !Ref VpcId
-      SecurityGroupEgress:
-        - IpProtocol: "-1"
-          CidrIp: 127.0.0.1/32
-          Description: No egress (RDS does not initiate connections)
-      Tags:
-        - Key: Name
-          Value: !Sub "${ProjectName}-db-sg"
-
-  # Proxy accepts traffic from the ECS service (rule added by the compute stack
-  # to avoid a cross-stack SG cycle) and forwards to the DB.
-  ProxySecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: !Sub "${ProjectName} RDS Proxy - ingress from ECS, egress to RDS"
-      VpcId: !Ref VpcId
-      Tags:
-        - Key: Name
-          Value: !Sub "${ProjectName}-proxy-sg"
-
-  ProxyEgressToDb:
-    Type: AWS::EC2::SecurityGroupEgress
-    Properties:
-      GroupId: !Ref ProxySecurityGroup
-      IpProtocol: tcp
-      FromPort: 5432
-      ToPort: 5432
-      DestinationSecurityGroupId: !Ref DbSecurityGroup
-      Description: PostgreSQL to RDS
-
-  DbIngressFromProxy:
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      GroupId: !Ref DbSecurityGroup
-      IpProtocol: tcp
-      FromPort: 5432
-      ToPort: 5432
-      SourceSecurityGroupId: !Ref ProxySecurityGroup
-      Description: PostgreSQL from RDS Proxy
-
   # ---- PostgreSQL instance ----
   Database:
     Type: AWS::RDS::DBInstance
@@ -100,7 +58,7 @@ Resources:
     Properties:
       DBInstanceIdentifier: !Sub "${ProjectName}-db"
       Engine: postgres
-      EngineVersion: "16"
+      EngineVersion: "17.7"
       DBInstanceClass: !Ref DBInstanceClass
       AllocatedStorage: "20"
       StorageType: gp3
@@ -111,7 +69,7 @@ Resources:
       ManageMasterUserPassword: true
       DBSubnetGroupName: !Ref DbSubnetGroup
       VPCSecurityGroups:
-        - !Ref DbSecurityGroup
+        - !Ref DbSecurityGroupId
       PubliclyAccessible: false
       BackupRetentionPeriod: 1
       AutoMinorVersionUpgrade: true
@@ -163,7 +121,7 @@ Resources:
         - !Ref DataSubnet1
         - !Ref DataSubnet2
       VpcSecurityGroupIds:
-        - !Ref ProxySecurityGroup
+        - !Ref ProxySecurityGroupId
       RequireTLS: false
       IdleClientTimeout: 1800
       Tags:
@@ -218,7 +176,3 @@ Outputs:
     Value: !Ref DBName
   DbSecretArn:
     Value: !GetAtt Database.MasterUserSecret.SecretArn
-  DbSecurityGroupId:
-    Value: !Ref DbSecurityGroup
-  ProxySecurityGroupId:
-    Value: !Ref ProxySecurityGroup
