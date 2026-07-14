@@ -39,9 +39,6 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
 
-  # Assumed by the running container. Grants ECS Exec + the To-Do app's data
-  # access (SSM config + DB credentials secret). Redis needs no IAM (network
-  # access is controlled by the cache security group).
   TaskRole:
     Type: AWS::IAM::Role
     Properties:

@@ -89,10 +89,6 @@ Resources:
     Properties:
       GroupDescription: !Sub "${ProjectName} RDS - ingress from RDS Proxy only"
       VpcId: !Ref VpcId
-      SecurityGroupEgress:
-        - IpProtocol: "-1"
-          CidrIp: 127.0.0.1/32
-          Description: No egress (RDS does not initiate connections)
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-db-sg"
@@ -105,10 +101,6 @@ Resources:
     Properties:
       GroupDescription: !Sub "${ProjectName} Redis - ingress from ECS tasks only"
       VpcId: !Ref VpcId
-      SecurityGroupEgress:
-        - IpProtocol: "-1"
-          CidrIp: 127.0.0.1/32
-          Description: No egress (cache does not initiate connections)
       Tags:
         - Key: Name
           Value: !Sub "${ProjectName}-redis-sg"

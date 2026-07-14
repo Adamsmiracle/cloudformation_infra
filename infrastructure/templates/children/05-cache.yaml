@@ -34,6 +34,8 @@ Resources:
 
   RedisReplicationGroup:
     Type: AWS::ElastiCache::ReplicationGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       ReplicationGroupId: !Sub "${ProjectName}-redis"
       ReplicationGroupDescription: !Sub "${ProjectName} Redis read cache"

@@ -22,11 +22,11 @@
           <mxGeometry x="320" y="120" width="130" height="70" as="geometry" />
         </mxCell>
 
-        <mxCell id="ecr" value="Amazon ECR&#10;todo-app-app&#10;(created by prereq stack)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#C8511B;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=10;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.elastic_container_registry;" vertex="1" parent="1">
+        <mxCell id="ecr" value="Amazon ECR&#10;todo-app-app&#10;(created by prereq stack)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#C8511B;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=10;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ecr;" vertex="1" parent="1">
           <mxGeometry x="490" y="80" width="48" height="48" as="geometry" />
         </mxCell>
 
-        <mxCell id="s3_deploy" value="S3 deploy-source&#10;deploy-bundle.zip&#10;(taskdef+appspec)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#7AA116;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=10;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.simple_storage_service;" vertex="1" parent="1">
+        <mxCell id="s3_deploy" value="S3 deploy-source&#10;deploy-bundle.zip&#10;(taskdef+appspec)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#7AA116;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=10;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.s3;" vertex="1" parent="1">
           <mxGeometry x="490" y="200" width="48" height="48" as="geometry" />
         </mxCell>
 
@@ -38,7 +38,7 @@
           <mxGeometry x="810" y="130" width="48" height="48" as="geometry" />
         </mxCell>
 
-        <mxCell id="s3_artifact" value="S3 pipeline&#10;artifacts" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#7AA116;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=10;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.simple_storage_service;" vertex="1" parent="1">
+        <mxCell id="s3_artifact" value="S3 pipeline&#10;artifacts" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#7AA116;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=10;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.s3;" vertex="1" parent="1">
           <mxGeometry x="812" y="235" width="40" height="40" as="geometry" />
         </mxCell>
 
@@ -59,11 +59,11 @@
           <mxGeometry x="215" y="355" width="44" height="44" as="geometry" />
         </mxCell>
 
-        <mxCell id="s3_templates" value="S3 TemplatesBucket&#10;todo-app-cfn-templates-*" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#7AA116;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=9;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.simple_storage_service;" vertex="1" parent="1">
+        <mxCell id="s3_templates" value="S3 TemplatesBucket&#10;todo-app-cfn-templates-*" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#7AA116;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=9;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.s3;" vertex="1" parent="1">
           <mxGeometry x="320" y="355" width="44" height="44" as="geometry" />
         </mxCell>
 
-        <mxCell id="ecr_prereq" value="Amazon ECR&#10;todo-app-app" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#C8511B;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=9;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.elastic_container_registry;" vertex="1" parent="1">
+        <mxCell id="ecr_prereq" value="Amazon ECR&#10;todo-app-app" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#C8511B;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=9;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.ecr;" vertex="1" parent="1">
           <mxGeometry x="425" y="355" width="44" height="44" as="geometry" />
         </mxCell>
 
@@ -187,7 +187,7 @@
         </mxCell>
 
         <!-- ============================ REGIONAL SERVICES (right) ============================ -->
-        <mxCell id="ssm" value="SSM Parameter Store&#10;/todo-app/*&#10;(db + redis config)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#E7157B;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=10;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.systems_manager_parameter_store;" vertex="1" parent="cloud">
+        <mxCell id="ssm" value="SSM Parameter Store&#10;/todo-app/*&#10;(db + redis config)" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#E7157B;strokeColor=none;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=10;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.parameter_store;" vertex="1" parent="cloud">
           <mxGeometry x="1420" y="140" width="48" height="48" as="geometry" />
         </mxCell>
 
