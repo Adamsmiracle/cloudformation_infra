@@ -100,7 +100,6 @@ Parameters:
     Description: Bumped on every infra-repo push to force nested stack refresh
 
 Resources:
-
   # -------------------------------------------------------------------------
   # Child 1 — Networking
   # -------------------------------------------------------------------------
