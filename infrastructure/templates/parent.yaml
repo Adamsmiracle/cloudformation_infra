@@ -127,6 +127,7 @@ Resources:
         - Key: Layer
           Value: network
 
+
   # -------------------------------------------------------------------------
   # Child 2 — Security groups (the whole traffic matrix, one file)
   # -------------------------------------------------------------------------
@@ -138,7 +139,6 @@ Resources:
       Parameters:
         ProjectName:     !Ref ProjectName
         VpcId:           !GetAtt NetworkStack.Outputs.VpcId
-        VpcCidr:         !GetAtt NetworkStack.Outputs.VpcCidr
         ContainerPort:   !Ref ContainerPort
         TemplateVersion: !Ref TemplateVersion
       Tags:
