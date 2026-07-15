@@ -32,6 +32,7 @@ Resources:
         - !Ref CacheSubnet1
         - !Ref CacheSubnet2
 
+
   RedisReplicationGroup:
     Type: AWS::ElastiCache::ReplicationGroup
     DeletionPolicy: Delete

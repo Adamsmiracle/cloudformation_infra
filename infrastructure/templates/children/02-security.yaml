@@ -120,6 +120,7 @@ Resources:
         - Key: Name
           Value: !Sub "${ProjectName}-redis-sg"
 
+
 Outputs:
   AlbSecurityGroupId:
     Value: !Ref AlbSecurityGroup

@@ -48,7 +48,6 @@ Parameters:
   TemplateVersion:
     Type: String
 
-
 Resources:
   # ---- ALB ----
   LoadBalancer:

@@ -250,6 +250,7 @@ Resources:
                 - Name: SourceArtifact
               RunOrder: 1
 
+
 Outputs:
   PipelineName:
     Value: !Ref Pipeline
