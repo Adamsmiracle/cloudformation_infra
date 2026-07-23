@@ -212,6 +212,7 @@ Resources:
         ScaleInCooldown: 60
         ScaleOutCooldown: 60
 
+
 Outputs:
   AlbDnsName:
     Value: !GetAtt LoadBalancer.DNSName

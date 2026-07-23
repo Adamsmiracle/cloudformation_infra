@@ -163,7 +163,6 @@ Resources:
       Type: String
       Value: !GetAtt Database.MasterUserSecret.SecretArn
 
-
 Outputs:
   DbEndpointAddress:
     Description: Raw RDS endpoint (apps should use the proxy endpoint instead)
