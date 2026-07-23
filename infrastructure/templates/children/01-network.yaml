@@ -157,7 +157,6 @@ Resources:
         - Key: Tier
           Value: cache
 
-
   # ---- Routing ----
   PublicRouteTable:
     Type: AWS::EC2::RouteTable

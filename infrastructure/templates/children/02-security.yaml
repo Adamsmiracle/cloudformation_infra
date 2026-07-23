@@ -13,7 +13,6 @@ Description: >
     ECS tasks :6379 -> ElastiCache Redis
     ECS tasks :443  -> VPC interface endpoints + S3 gateway endpoint
 
-
   Every ingress rule lives inline in its own group; the references between
   groups form no cycle (ALB <- tasks <- proxy <- DB, tasks <- cache), so no
   standalone rule resources are needed.

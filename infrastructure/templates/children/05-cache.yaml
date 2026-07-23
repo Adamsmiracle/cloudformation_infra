@@ -64,7 +64,6 @@ Resources:
       Type: String
       Value: !GetAtt RedisReplicationGroup.PrimaryEndPoint.Address
 
-
   RedisPortParam:
     Type: AWS::SSM::Parameter
     Properties:

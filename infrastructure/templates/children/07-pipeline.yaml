@@ -63,7 +63,6 @@ Resources:
             AbortIncompleteMultipartUpload:
               DaysAfterInitiation: 1
 
-
   ArtifactBucketPolicy:
     Type: AWS::S3::BucketPolicy
     Properties:

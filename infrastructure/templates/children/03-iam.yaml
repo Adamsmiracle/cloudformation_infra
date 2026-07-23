@@ -171,7 +171,6 @@ Resources:
                   - s3:ListBucket
                 Resource: !Sub "arn:aws:s3:::${ProjectName}-deploy-source-${AWS::AccountId}-${AWS::Region}"
 
-
   # ---------------------------------------------------------------------------
   # EventBridge: lets the ECR-push rule start the pipeline.
   # ---------------------------------------------------------------------------

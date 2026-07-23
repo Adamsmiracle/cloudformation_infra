@@ -242,6 +242,7 @@ Resources:
         - Key: Layer
           Value: compute
 
+
   # -------------------------------------------------------------------------
   # Child 7 — CI/CD pipeline (ECR push → EventBridge → CodePipeline → CodeDeploy)
   # The ECR repository itself lives in the prerequisites stack; its name is
